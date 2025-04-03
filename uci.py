@@ -71,7 +71,15 @@ class UCIEngine:
                 print(f"info string Invalid move: {move_uci}")
 
     def go_command(self, cmd):
+        parts = cmd.split()
         search_depth = 3
+        if 'depth' in parts:
+            try:
+                depth_index = parts.index('depth')
+                if depth_index + 1 < len(parts):
+                    search_depth = int(parts[depth_index + 1])
+            except (ValueError, IndexError):
+                pass
         best_move = self.ai.get_best_move(search_depth)
         if best_move:
             print(f"bestmove {best_move}")

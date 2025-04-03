@@ -39,22 +39,114 @@ class ChessAI:
             chess.KING: 0
         }
 
-        score = 0
-        for piece_type in piece_values:
-            score += len(self.board.pieces(piece_type, chess.WHITE)) * piece_values[piece_type]
-            score -= len(self.board.pieces(piece_type, chess.BLACK)) * piece_values[piece_type]
+        pawn_table = [
+            0,  0,  0,  0,  0,  0,  0,  0,
+            50, 50, 50, 50, 50, 50, 50, 50,
+            10, 10, 20, 30, 30, 20, 10, 10,
+            5,  5, 10, 25, 25, 10,  5,  5,
+            0,  0,  0, 20, 20,  0,  0,  0,
+            5, -5,-10,  0,  0,-10, -5,  5,
+            5, 10, 10,-20,-20, 10, 10,  5,
+            0,  0,  0,  0,  0,  0,  0,  0
+        ]
 
-        original_turn = self.board.turn
+        knight_table = [
+            -50,-40,-30,-30,-30,-30,-40,-50,
+            -40,-20,  0,  0,  0,  0,-20,-40,
+            -30,  0, 10, 15, 15, 10,  0,-30,
+            -30,  5, 15, 20, 20, 15,  5,-30,
+            -30,  0, 15, 20, 20, 15,  0,-30,
+            -30,  5, 10, 15, 15, 10,  5,-30,
+            -40,-20,  0,  5,  5,  0,-20,-40,
+            -50,-40,-30,-30,-30,-30,-40,-50
+        ]
 
-        self.board.turn = chess.WHITE
-        white_moves = len(list(self.board.legal_moves))
+        bishop_table = [
+            -20,-10,-10,-10,-10,-10,-10,-20,
+            -10,  0,  0,  0,  0,  0,  0,-10,
+            -10,  0, 10, 10, 10, 10,  0,-10,
+            -10,  5,  5, 10, 10,  5,  5,-10,
+            -10,  0,  5, 10, 10,  5,  0,-10,
+            -10,  5,  5,  5,  5,  5,  5,-10,
+            -10,  0,  5,  0,  0,  5,  0,-10,
+            -20,-10,-10,-10,-10,-10,-10,-20
+        ]
 
-        self.board.turn = chess.BLACK
-        black_moves = len(list(self.board.legal_moves))
+        rook_table = [
+            0,  0,  0,  0,  0,  0,  0,  0,
+            5, 10, 10, 10, 10, 10, 10,  5,
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            0,  0,  0,  5,  5,  0,  0,  0
+        ]
 
-        self.board.turn = original_turn
+        queen_table = [
+            -20,-10,-10, -5, -5,-10,-10,-20,
+            -10,  0,  0,  0,  0,  0,  0,-10,
+            -10,  0,  5,  5,  5,  5,  0,-10,
+            -5,  0,  5,  5,  5,  5,  0, -5,
+            0,  0,  5,  5,  5,  5,  0, -5,
+            -10,  5,  5,  5,  5,  5,  0,-10,
+            -10,  0,  5,  0,  0,  0,  0,-10,
+            -20,-10,-10, -5, -5,-10,-10,-20
+        ]
 
-        score += (white_moves - black_moves) * 10
+        king_middle_game_table = [
+            -30,-40,-40,-50,-50,-40,-40,-30,
+            -30,-40,-40,-50,-50,-40,-40,-30,
+            -30,-40,-40,-50,-50,-40,-40,-30,
+            -30,-40,-40,-50,-50,-40,-40,-30,
+            -20,-30,-30,-40,-40,-30,-30,-20,
+            -10,-20,-20,-20,-20,-20,-20,-10,
+            20, 20,  0,  0,  0,  0, 20, 20,
+            20, 30, 10,  0,  0, 10, 30, 20
+        ]
+
+        material_score = 0
+        position_score = 0
+        for square in chess.SQUARES:
+            piece = self.board.piece_at(square)
+            if piece:
+                value = piece_values.get(piece.piece_type, 0)
+
+                pos_value = 0
+                if piece.piece_type == chess.PAWN:
+                    pos_value = pawn_table[square]
+                elif piece.piece_type == chess.KNIGHT:
+                    pos_value = knight_table[square]
+                elif piece.piece_type == chess.BISHOP:
+                    pos_value = bishop_table[square]
+                elif piece.piece_type == chess.QUEEN:
+                    pos_value = queen_table[square]
+                elif piece.piece_type == chess.KING:
+                    pos_value = king_middle_game_table[square]    
+
+                if piece.color == chess.WHITE:
+                    material_score += value
+                    position_score += pos_value
+                else:
+                    material_score -= value
+                    position_score -= pos_value
+
+        try:
+            original_turn = self.board.turn
+
+            self.board.turn = chess.WHITE
+            white_moves = len(list(self.board.legal_moves))
+
+            self.board.turn = chess.BLACK
+            black_moves = len(list(self.board.legal_moves))
+
+            self.board.turn = original_turn
+
+            mobility_score = (white_moves - black_moves) * 5
+        except Exception:
+            mobility_score = 0
+
+        score = material_score + position_score * 0.3 + mobility_score
 
         return score
     
@@ -94,7 +186,21 @@ class ChessAI:
         alpha = float("-inf")
         beta = float("inf")
 
-        for move in self.board.legal_moves:
+        def move_value(move):
+            if self.board.is_capture(move):
+                return 10
+            elif move.promotion:
+                return 9
+            else:
+                return 0
+
+        legal_moves = sorted(
+            list(self.board.legal_moves),
+            key=move_value,
+            reverse=True
+        )
+
+        for move in legal_moves:
             self.board.push(move)
 
             if self.board.turn == chess.WHITE:

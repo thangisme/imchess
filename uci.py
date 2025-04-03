@@ -1,0 +1,83 @@
+import chess
+from chess_ai import ChessAI
+import sys
+import time
+
+class UCIEngine:
+    def __init__(self):
+        self.ai = ChessAI()
+        self.name = "ImChess"
+        self.author = "..."
+
+    def uci_loop(self):
+        while True:
+            if sys.stdin.isatty():
+                # If running in a terminal then prompt for input
+                cmd = input("uci> ")
+            else:
+                cmd = input()
+
+            if not cmd:
+                continue
+
+            if cmd == "uci":
+                self.uci_command()
+            elif cmd == "isready":
+                self.isready_command()
+            elif cmd == "ucinewgame":
+                self.ucinewgame_command()
+            elif cmd.startswith("position"):
+                self.position_command(cmd)
+            elif cmd.startswith("go"):
+                self.go_command(cmd)
+            elif cmd == "quit":
+                break
+            else:
+                print(f"Unknown command: {cmd}")
+
+    def uci_command(self):
+        print(f"id name {self.name}")
+        print(f"id author {self.author}")
+        print("uciok")
+
+    def isready_command(self):
+        print("readyok")
+
+    def ucinewgame_command(self):
+        self.ai.reset_board()
+
+    def position_command(self, cmd):
+        parts = cmd.split()
+
+        try:
+            moves_index = parts.index("moves")
+            moves = parts[moves_index + 1:]
+            parts = parts[:moves_index]
+        except ValueError:
+            moves = []
+
+        if len(parts) >= 2:
+            if parts[1] == "startpos":
+                self.ai.reset_board()
+            elif parts[1] == "fen" and len(parts) >= 8:
+                fen = " ".join(parts[2:8])
+                self.ai.set_board_from_fen(fen)
+
+        for move_uci in moves:
+            try:
+                move = chess.Move.from_uci(move_uci)
+                self.ai.make_move(move)
+            except ValueError:
+                print(f"info string Invalid move: {move_uci}")
+
+    def go_command(self, cmd):
+        search_depth = 3
+        best_move = self.ai.get_best_move(search_depth)
+        if best_move:
+            print(f"bestmove {best_move}")
+        else:
+            print("bestmove 0000") # No legal moves
+
+if __name__ == "__main__":
+    engine = UCIEngine()
+    engine.uci_loop()

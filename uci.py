@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import chess
 from chess_ai import ChessAI
 import sys
@@ -19,6 +21,8 @@ class UCIEngine:
 
             if not cmd:
                 continue
+
+            print(f"Received input: {cmd}", file=sys.stderr)
 
             if cmd == "uci":
                 self.uci_command()
@@ -72,15 +76,36 @@ class UCIEngine:
 
     def go_command(self, cmd):
         parts = cmd.split()
-        search_depth = 3
-        if 'depth' in parts:
-            try:
-                depth_index = parts.index('depth')
-                if depth_index + 1 < len(parts):
-                    search_depth = int(parts[depth_index + 1])
-            except (ValueError, IndexError):
-                pass
-        best_move = self.ai.get_best_move(search_depth)
+
+        depth = 10
+        time_limit = 10.0
+
+        print(f"{depth} {time_limit}", file=sys.stderr)
+        
+        for i in range(len(parts)):
+            if parts[i] == "depth" and i + 1 < len(parts):
+                try:
+                    depth = int(parts[i + 1])
+                except ValueError:
+                    pass
+            elif parts[i] == "movetime" and i + 1 < len(parts):
+                try:
+                    time_limit = int(parts[i + 1]) / 1000.0
+                except ValueError:
+                    pass
+            elif parts[i] == "wtime" and i + 1 < len(parts) and self.ai.board.turn == chess.WHITE:
+                try:
+                    time_limit = int(parts[i + 1]) / 1000.0 / 20.0
+                except ValueError:
+                    pass
+            elif parts[i] == "btime" and i + 1 < len(parts) and self.ai.board.turn == chess.BLACK:
+                try:
+                    time_limit = int(parts[i + 1]) / 1000.0 / 20.0
+                except ValueError:
+                    pass
+
+
+        best_move = self.ai.get_best_move_iterative_deepening(depth,time_limit)
         if best_move:
             print(f"bestmove {best_move}")
         else:
@@ -89,3 +114,4 @@ class UCIEngine:
 if __name__ == "__main__":
     engine = UCIEngine()
     engine.uci_loop()
+

@@ -1,9 +1,13 @@
 import chess
+import chess.polyglot
 import random
+import time
 
 class ChessAI:
     def __init__(self):
         self.board = chess.Board()
+        self.transposition_table = {}
+        self.nodes_searched = 0
 
     def reset_board(self):
         self.board = chess.Board()
@@ -117,6 +121,8 @@ class ChessAI:
                     pos_value = pawn_table[square]
                 elif piece.piece_type == chess.KNIGHT:
                     pos_value = knight_table[square]
+                elif piece.piece_type == chess.ROOK:
+                    pos_value = rook_table[square]
                 elif piece.piece_type == chess.BISHOP:
                     pos_value = bishop_table[square]
                 elif piece.piece_type == chess.QUEEN:
@@ -149,58 +155,147 @@ class ChessAI:
         score = material_score + position_score * 0.3 + mobility_score
 
         return score
+
+    def get_board_hash(self):
+        return chess.polyglot.zobrist_hash(self.board)
     
     def minimax(self, depth, alpha, beta, maximizing_player):
-        try:
-            if depth == 0 or self.board.is_game_over():
-                return self.evaluate_board()
+        self.nodes_searched += 1
 
-            if maximizing_player:
-                max_eval = float("-inf")
-                for move in self.board.legal_moves:
-                    self.board.push(move)
-                    eval = self.minimax(depth - 1, alpha, beta, False)
-                    self.board.pop()
-                    max_eval = max(max_eval, eval)
-                    alpha = max(alpha,eval)
-                    if beta <= alpha:
-                        break
-                return max_eval
-            else:
-                min_eval = float("inf")
-                for move in self.board.legal_moves:
-                    self.board.push(move)
-                    eval = self.minimax(depth - 1, alpha, beta, True)
-                    self.board.pop()
-                    min_eval = min(min_eval, eval)
-                    beta = min(beta, eval)
-                    if (beta <= alpha):
-                        break
-                return min_eval
-        except Exception as e:
+        if self.board.is_repetition(3) or self.board.is_fifty_moves():
             return 0
+
+        board_hash = self.get_board_hash()
+        if board_hash in self.transposition_table:
+            stored_depth, stored_value, stored_flag = self.transposition_table[board_hash]
+            if stored_depth >= depth:
+                if stored_flag == "EXACT":
+                    return stored_value
+                elif stored_flag == "LOWERBOUND" and stored_value > alpha:
+                    alpha = stored_value
+                elif stored_flag == "UPPERBOUND" and stored_value < beta:
+                    beta = stored_value
+                if alpha >= beta:
+                    return stored_value
+
+        if depth == 0 or self.board.is_game_over():
+            return self.evaluate_board()
+
+        original_alpha = alpha
+
+        if maximizing_player:
+            max_eval = float("-inf")
+            for move in self.order_moves(self.board.legal_moves):
+                self.board.push(move)
+                eval = self.minimax(depth - 1, alpha, beta, False)
+                self.board.pop()
+                max_eval = max(max_eval, eval)
+                alpha = max(alpha,eval)
+                if beta <= alpha:
+                    break
+
+            if max_eval <= original_alpha:
+                flag = "UPPERBOUND"
+            elif max_eval >= beta:
+                flag = "LOWERBOUND"
+            else:
+                flag = "EXACT"
+            self.transposition_table[board_hash] = (depth, max_eval, flag)
+            
+            return max_eval
+        else:
+            min_eval = float("inf")
+            for move in self.order_moves(self.board.legal_moves):
+                self.board.push(move)
+                eval = self.minimax(depth - 1, alpha, beta, True)
+                self.board.pop()
+                min_eval = min(min_eval, eval)
+                beta = min(beta, eval)
+                if (beta <= alpha):
+                    break
+
+            if min_eval <= original_alpha:
+                flag = "UPPERBOUND"
+            elif min_eval >= beta:
+                flag = "LOWERBOUND"
+            else:
+                flag = "EXACT"
+            self.transposition_table[board_hash] = (depth, min_eval, flag)
+            
+            return min_eval
                 
+    def order_moves(self, moves):
+        scored_moves = []
+        for move in moves:
+            score = 0
+            if self.board.is_capture(move):
+                victim_piece = self.board.piece_at(move.to_square)
+                attacker_piece = self.board.piece_at(move.from_square)
+                if victim_piece and attacker_piece:
+                    victim_value = {
+                        chess.PAWN: 10,
+                        chess.KNIGHT: 30,
+                        chess.BISHOP:30,
+                        chess.ROOK: 50,
+                        chess.QUEEN: 90,
+                        chess.KING: 900
+                    }
+                    attacker_value = {
+                        chess.PAWN: 1,
+                        chess.KNIGHT: 3,
+                        chess.BISHOP: 3,
+                        chess.ROOK: 5,
+                        chess.QUEEN: 9,
+                        chess.KING: 90
+                    }
+                    score = 1000 + victim_value[victim_piece.piece_type] - attacker_value[attacker_piece.piece_type]
+
+            if move.promotion:
+                score += 900
+
+            self.board.push(move)
+            if self.board.is_check():
+                score += 50
+            self.board.pop()
+            scored_moves.append((move, score))
+        scored_moves.sort(key=lambda x: x[1], reverse=True)
+        return [move for move, _ in scored_moves]
+            
+    def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0):
+        start_time = time.time()
+        best_move = None
+        self.nodes_searched = 0
+
+        for current_depth in range(1, max_depth + 1):
+            elapsed = time.time() - start_time
+            if elapsed > time_limit * 0.8:
+                break
+
+            self.transposition_table = {}
+            move = self.get_best_move(current_depth)
+            elapsed = time.time() - start_time
+
+            if move:
+                best_move = move
+
+            nps = int(self.nodes_searched /elapsed) if elapsed > 0 else 0
+
+            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}")
+
+            if elapsed >= time_limit:
+                break
+
+        return best_move
+            
     def get_best_move(self, depth=3):
         best_move = None
         best_value = float("-inf") if self.board.turn == chess.WHITE else float("inf")
         alpha = float("-inf")
         beta = float("inf")
 
-        def move_value(move):
-            if self.board.is_capture(move):
-                return 10
-            elif move.promotion:
-                return 9
-            else:
-                return 0
+        self.board_score = 0
 
-        legal_moves = sorted(
-            list(self.board.legal_moves),
-            key=move_value,
-            reverse=True
-        )
-
-        for move in legal_moves:
+        for move in self.order_moves(self.board.legal_moves):
             self.board.push(move)
 
             if self.board.turn == chess.WHITE:
@@ -222,6 +317,5 @@ class ChessAI:
                     best_move = move
                     beta = min(beta, best_value)
 
-        if best_move is None and list(self.board.legal_moves):
-            best_move = random.choice(list(self.board.legal_moves))
+        self.board_score = best_value
         return best_move

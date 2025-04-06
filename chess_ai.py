@@ -339,6 +339,8 @@ class ChessAI:
 
             if elapsed >= time_limit:
                 break
+        if best_move is None and list(self.board.legal_moves):
+            best_move = self.get_random_move()
 
         return best_move
             

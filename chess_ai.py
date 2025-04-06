@@ -178,8 +178,11 @@ class ChessAI:
                 if alpha >= beta:
                     return stored_value
 
-        if depth == 0 or self.board.is_game_over():
+        if self.board.is_game_over():
             return self.evaluate_board()
+
+        if depth == 0:
+            return self.quiescence_search(alpha, beta,maximizing_player)
 
         original_alpha = alpha
 
@@ -223,6 +226,50 @@ class ChessAI:
             self.transposition_table[board_hash] = (depth, min_eval, flag)
             
             return min_eval
+    def quiescence_search(self, alpha, beta, maximizing_player, q_depth=0):
+        self.nodes_searched += 1
+
+        MAX_QDEPTH = 8
+        if q_depth >= MAX_QDEPTH:
+            return self.evaluate_board()
+
+        if self.board.is_game_over():
+            return self.evaluate_board()
+
+        stand_pat_score = self.evaluate_board()
+
+        if maximizing_player:
+            if stand_pat_score >= beta:
+                return beta
+            alpha = max(alpha, stand_pat_score)
+        else:
+            if stand_pat_score <= alpha:
+                return alpha
+            beta = min(beta, stand_pat_score)
+
+        captures = [move for move in self.board.legal_moves if self.board.is_capture(move)]
+        captures = self.order_moves(captures)
+
+        if maximizing_player:
+            for move in captures:
+                self.board.push(move)
+                score = self.quiescence_search(alpha, beta, False, q_depth + 1)
+                self.board.pop()
+
+                if score >= beta:
+                    return beta
+                alpha = max(alpha, score)
+        else:
+            for move in captures:
+                self.board.push(move)
+                score = self.quiescence_search(alpha, beta, True, q_depth + 1)
+                self.board.pop()
+
+                if score >= alpha:
+                    return alpha
+                alpha = max(beta, score)
+        
+        return alpha if maximizing_player else beta
                 
     def order_moves(self, moves):
         scored_moves = []

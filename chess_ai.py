@@ -2,12 +2,14 @@ import chess
 import chess.polyglot
 import random
 import time
+import sys
 
 class ChessAI:
     def __init__(self):
         self.board = chess.Board()
         self.transposition_table = {}
         self.nodes_searched = 0
+        self.opening_book = "baron30.bin"
 
     def reset_board(self):
         self.board = chess.Board()
@@ -309,6 +311,12 @@ class ChessAI:
         return [move for move, _ in scored_moves]
             
     def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0):
+        book_move = self.get_book_move()
+        if book_move:
+            print(f"info string book move {book_move.uci()}")
+            self.board_score = 0
+            return book_move
+        
         start_time = time.time()
         best_move = None
         self.nodes_searched = 0
@@ -366,3 +374,26 @@ class ChessAI:
 
         self.board_score = best_value
         return best_move
+
+    def get_book_move(self):
+        try:
+            with chess.polyglot.open_reader(self.opening_book) as reader:
+                entries = list(reader.find_all(self.board))
+                print(entries, file=sys.stderr)
+
+                print(f"book {self.opening_book}")
+
+                if entries:
+                    total = sum(entry.weight for entry in entries)
+                    pick = random.randint(1, total)
+                    current_sum = 0
+                    for entry in entries:
+                        current_sum += entry.weight
+                        if current_sum >= pick:
+                            return entry.move
+                    return entries[0].move
+            return None
+        except Exception as e:
+            print(f"info string Book error: {e}")
+            print("Error" + e, file=sys.stderr)
+            return None

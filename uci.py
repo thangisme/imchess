@@ -77,7 +77,7 @@ class UCIEngine:
     def go_command(self, cmd):
         parts = cmd.split()
 
-        depth = 10
+        depth = 20
         time_limit = 10.0
 
         print(f"{depth} {time_limit}", file=sys.stderr)

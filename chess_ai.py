@@ -155,7 +155,9 @@ class ChessAI:
             mobility_score = 0
 
         pawn_structure_score = self.evaluate_pawn_structure()
-        score = material_score + position_score * 0.3 + mobility_score + pawn_structure_score
+        king_safety_score = self.evaluate_king_safety()
+        
+        score = material_score + position_score * 0.3 + mobility_score + pawn_structure_score + king_safety_score
 
         return score
 
@@ -486,3 +488,57 @@ class ChessAI:
                         score -= passed_pawn_bonus[7 - rank_index]
                     
         return score
+
+    def evaluate_king_safety(self):
+        score = 0
+
+        white_king_square = self.board.king(chess.WHITE)
+        black_king_square = self.board.king(chess.BLACK)
+
+        if white_king_square is None or black_king_square is None:
+            return 0
+
+        def evaluate_king_side(king_square, color):
+            safety_score = 0
+            king_file = chess.square_file(king_square)
+            king_rank = chess.square_rank(king_square)
+
+            is_kingside = king_file >= 5
+            is_queenside = king_file <= 2
+
+            if color == chess.WHITE:
+                base_rank = 0
+                shield_ranks = [king_rank + 1, king_rank + 2]
+                file_check_range = range(1, 8)
+            else:
+                base_rank = 7
+                shield_ranks = [king_rank - 1, king_rank - 2]
+                file_check_range = range(6, -1, - 1)
+
+            if (is_kingside or is_queenside) and king_rank == base_rank:
+                shield_count = 0
+                for f in range(max(0, king_file - 1), min(8, king_file + 2)):
+                    for r in shield_ranks:
+                        if 0 <= r < 8:
+                            shield_square = chess.square(f, r)
+                            piece = self.board.piece_at(shield_square)
+                            if piece and piece.piece_type == chess.PAWN and piece.color == color:
+                                shield_count +=1
+
+                safety_score += shield_count * 10
+
+                for f in range(max(0, king_file - 1), min(8, king_file + 2)):
+                    file_open = True
+                    for r in file_check_range:
+                        square = chess.square(f, r)
+                        if self.board.piece_at(square) and self.board.piece_at(square).piece_type == chess.PAWN:
+                            file_open = False
+                            break
+                        if file_open:
+                            safety_score -= 25
+            return safety_score
+        score += evaluate_king_side(white_king_square, chess.WHITE)
+        score -= evaluate_king_side(black_king_square, chess.BLACK)
+
+        return score
+        

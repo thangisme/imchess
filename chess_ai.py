@@ -139,20 +139,7 @@ class ChessAI:
                     material_score -= value
                     position_score -= pos_value
 
-        try:
-            original_turn = self.board.turn
-
-            self.board.turn = chess.WHITE
-            white_moves = len(list(self.board.legal_moves))
-
-            self.board.turn = chess.BLACK
-            black_moves = len(list(self.board.legal_moves))
-
-            self.board.turn = original_turn
-
-            mobility_score = (white_moves - black_moves) * 5
-        except Exception:
-            mobility_score = 0
+        mobility_score = self.evaluate_mobility()
 
         pawn_structure_score = self.evaluate_pawn_structure()
         king_safety_score = self.evaluate_king_safety()
@@ -338,7 +325,7 @@ class ChessAI:
 
             nps = int(self.nodes_searched /elapsed) if elapsed > 0 else 0
 
-            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}")
+            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}", file=sys.stderr)
 
             if elapsed >= time_limit:
                 break
@@ -542,3 +529,50 @@ class ChessAI:
 
         return score
         
+    def evaluate_mobility(self):
+        mobility_score = 0
+        mobility_weights = {
+            chess.PAWN: 0.1,
+            chess.KNIGHT: 0.5,
+            chess.BISHOP: 0.6,
+            chess.ROOK: 0.4,
+            chess.QUEEN: 0.3,
+            chess.KING: 0.0
+        }
+
+        center_squares = [chess.E4, chess.D4, chess.E5, chess.D5]
+        extended_center = [
+            chess.C3, chess.D3, chess.E3, chess.F3,
+            chess.C4, chess.D4, chess.E4, chess.F4,
+            chess.C5, chess.D5, chess.E5, chess.F5,
+            chess.C6, chess.D6, chess.E6, chess.F6,
+        ]
+
+        original_turn = self.board.turn
+
+        mobility = {chess.WHITE: 0, chess.BLACK: 0}
+        center_control = {chess.WHITE: 0, chess.BLACK: 0}
+
+        for color in [chess.WHITE, chess.BLACK]:
+            self.board.turn = color
+
+            for square in chess.SQUARES:
+                piece = self.board.piece_at(square)
+                if piece and piece.color == color:
+                    moves = [move for move in self.board.legal_moves if move.from_square == square]
+                    mobility[color] += len(moves) * mobility_weights.get(piece.piece_type, 0)
+
+            for square in center_squares:
+                if self.board.is_attacked_by(color, square):
+                    center_control[color] += 3
+
+            for square in extended_center:
+                if self.board.is_attacked_by(color, square):               
+                    center_control[color] += 1
+
+        self.board.turn = original_turn
+
+        mobility_score = (mobility[chess.WHITE] - mobility[chess.BLACK]) * 2
+        center_score = (center_control[chess.WHITE] - center_control[chess.BLACK]) * 2
+
+        return mobility_score + center_score

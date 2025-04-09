@@ -154,7 +154,8 @@ class ChessAI:
         except Exception:
             mobility_score = 0
 
-        score = material_score + position_score * 0.3 + mobility_score
+        pawn_structure_score = self.evaluate_pawn_structure()
+        score = material_score + position_score * 0.3 + mobility_score + pawn_structure_score
 
         return score
 
@@ -399,3 +400,89 @@ class ChessAI:
             print(f"info string Book error: {e}")
             print("Error" + e, file=sys.stderr)
             return None
+
+    def evaluate_pawn_structure(self):
+        score = 0
+        white_pawn_files = [0] * 8
+        black_pawn_files = [0] * 8
+
+        # Count pawns on each file
+        for square in chess.SQUARES:
+            piece = self.board.piece_at(square)
+            if piece and piece.piece_type == chess.PAWN:
+                file_index = chess.square_file(square)
+                if piece.color == chess.WHITE:
+                    white_pawn_files[file_index] += 1
+                else:
+                    black_pawn_files[file_index] += 1
+
+        # Evaluate doubled pawns
+        doubled_pawn_penalty = 10
+        for file_index in range(8):
+            if white_pawn_files[file_index] > 1:
+                score -= (white_pawn_files[file_index] - 1) * doubled_pawn_penalty
+            if black_pawn_files[file_index] > 1:
+                score += (black_pawn_files[file_index] - 1) * doubled_pawn_penalty
+
+        # Evaluate isolated pawn
+        isolated_pawn_penalty = 15
+        for file_index in range(8):
+            if white_pawn_files[file_index] > 0:
+                is_isolated = True
+                if file_index > 0 and white_pawn_files[file_index - 1] > 0:
+                    is_isolated = False
+                if file_index < 7 and white_pawn_files[file_index + 1] > 0:
+                    is_isolated = False
+                if is_isolated:
+                    score -= isolated_pawn_penalty
+
+            if black_pawn_files[file_index] > 0:
+                is_isolated = True
+                if file_index > 0 and black_pawn_files[file_index - 1] > 0:
+                    is_isolated = False
+                if file_index < 7 and black_pawn_files[file_index + 1] > 0:
+                    is_isolated = False
+                if is_isolated:
+                    score += isolated_pawn_penalty
+                    
+        # Evaluate passed pawns
+        passed_pawn_bonus = [0, 10, 20, 30, 60, 100, 150, 0]
+
+        for square in chess.SQUARES:
+            piece = self.board.piece_at(square)
+            if piece and piece.piece_type == chess.PAWN:
+                file_index = chess.square_file(square)
+                rank_index = chess.square_rank(square)
+
+                if piece.color == chess.WHITE:
+                    is_passed = True
+                    for r in range(rank_index + 1, 8):
+                        for f in range(max(0, file_index - 1), min(8, file_index + 2)):
+                            check_square = chess.square(f, r)
+                            check_piece = self.board.piece_at(check_square)
+                            if check_piece and check_piece.piece_type == chess.PAWN and check_piece == chess.BLACK:
+                                is_passed = False
+                                break
+
+                        if not is_passed:
+                            break
+
+                    if is_passed:
+                        score += passed_pawn_bonus[rank_index]
+                else:
+                    is_passed = True
+                    for r in range(rank_index + 1, 8):
+                        for f in range(max(0, file_index - 1), min(8, file_index + 2)):
+                            check_square = chess.square(f, r)
+                            check_piece = self.board.piece_at(check_square)
+                            if check_piece and check_piece.piece_type == chess.PAWN and check_piece.color == chess.WHITE:
+                                is_passed = False
+                                break
+
+                        if not is_passed:
+                            break
+
+                    if is_passed:
+                        score -= passed_pawn_bonus[7 - rank_index]
+                    
+        return score

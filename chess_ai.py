@@ -200,15 +200,39 @@ class ChessAI:
 
         original_alpha = alpha
 
+        moves = list(self.order_moves(self.board.legal_moves))
+        moves_searched = 0
+
         if maximizing_player:
             max_eval = float("-inf")
-            for move in self.order_moves(self.board.legal_moves):
+            for move in moves:
+                is_check = self.board.is_check()
+                gives_check = False
+                self.board.push(move)
+                gives_check = self.board.is_check()
+                self.board.pop()
+
                 self.current_ply = current_ply + 1
 
-                self.board.push(move)
-                eval = self.minimax(depth - 1, alpha, beta, False)
-                self.board.pop()
+                reduced_depth = depth - 1
+                do_full_depth = True
+
+                if depth >= 3 and moves_searched >= 3 and not is_check and not gives_check and not self.board.is_capture(move):
+                    reduced_depth = depth - 2
+
+                    self.board.push(move)
+                    eval = -self.minimax(reduced_depth, -beta, -alpha, False)
+                    self.board.pop()
+
+                    do_full_depth = (eval > alpha)
+
+                if do_full_depth:
+                    self.board.push(move)
+                    eval = self.minimax(depth - 1, alpha, beta, False)
+                    self.board.pop()
+
                 self.current_ply = current_ply
+                moves_searched += 1
 
                 max_eval = max(max_eval, eval)
                 alpha = max(alpha,eval)
@@ -227,18 +251,39 @@ class ChessAI:
             return max_eval
         else:
             min_eval = float("inf")
-            for move in self.order_moves(self.board.legal_moves):
-                self.current_ply = current_ply + 1
-
+            for move in moves:
+                is_check = self.board.is_check()
+                gives_check = False
                 self.board.push(move)
-                eval = self.minimax(depth - 1, alpha, beta, True)
+                gives_check = self.board.is_check()
                 self.board.pop()
 
+                self.current_ply = current_ply + 1
+
+                reduced_depth = depth - 1
+
+                do_full_depth = True
+
+                if depth >= 3 and moves_searched >= 3 and not is_check and not gives_check and not self.board.is_capture(move):
+                    reduced_depth = depth = 2
+
+                    self.board.push(move)
+                    eval = -self.minimax(reduced_depth, -beta, -alpha, True)
+                    self.board.pop()
+
+                    do_full_depth = (eval < beta)
+
+                if do_full_depth:
+                    self.board.push(move)
+                    eval = self.minimax(depth - 1, alpha, beta, True)
+                    self.board.pop()
+
                 self.current_ply = current_ply
-                
+                moves_searched += 1
+
                 min_eval = min(min_eval, eval)
                 beta = min(beta, eval)
-                if (beta <= alpha):
+                if beta <= alpha:
                     self.add_killer_move(move)
                     break
 
@@ -351,25 +396,41 @@ class ChessAI:
         best_move = None
         self.nodes_searched = 0
 
+        legal_moves = list(self.board.legal_moves)
+        if len(legal_moves) == 1:
+            return legal_moves[0]
+
         for current_depth in range(1, max_depth + 1):
             elapsed = time.time() - start_time
             if elapsed > time_limit * 0.8:
                 break
 
-            self.transposition_table = {}
+            # self.transposition_table = {}
             move = self.get_best_move(current_depth)
             elapsed = time.time() - start_time
 
             if move:
                 best_move = move
+                nps = int(self.nodes_searched / elapsed) if elapsed > 0 else 0
 
-            nps = int(self.nodes_searched /elapsed) if elapsed > 0 else 0
+                if abs(self.board_score) >= 9900:
+                    if self.board_score > 0:
+                        mate_in = (10000 - self.board_score + 1) // 2
+                        score_str = f"mate {mate_in}"
+                    else:
+                        mate_in = (10000 + self.board_score + 1) // 2
+                        score_str = f"mate -{mate_in}"
+                else:
+                    score_str = f"cp {int(self.board_score)}"
+                print(f"info depth {current_depth} score {score_str} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}")
+                print(f"info depth {current_depth} score {score_str} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}", file=sys.stderr)
 
-            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}")
-            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}", file=sys.stderr)
+                if abs(self.board_score) >= 9900:
+                    break
 
             if elapsed >= time_limit:
                 break
+            
         if best_move is None and list(self.board.legal_moves):
             best_move = self.get_random_move()
 
@@ -488,7 +549,7 @@ class ChessAI:
                         for f in range(max(0, file_index - 1), min(8, file_index + 2)):
                             check_square = chess.square(f, r)
                             check_piece = self.board.piece_at(check_square)
-                            if check_piece and check_piece.piece_type == chess.PAWN and check_piece == chess.BLACK:
+                            if check_piece and check_piece.piece_type == chess.PAWN and check_piece.color == chess.BLACK:
                                 is_passed = False
                                 break
 
@@ -560,8 +621,8 @@ class ChessAI:
                         if self.board.piece_at(square) and self.board.piece_at(square).piece_type == chess.PAWN:
                             file_open = False
                             break
-                        if file_open:
-                            safety_score -= 25
+                    if file_open:
+                        safety_score -= 25
             return safety_score
         score += evaluate_king_side(white_king_square, chess.WHITE)
         score -= evaluate_king_side(black_king_square, chess.BLACK)

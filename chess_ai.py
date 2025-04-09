@@ -10,6 +10,8 @@ class ChessAI:
         self.transposition_table = {}
         self.nodes_searched = 0
         self.opening_book = "baron30.bin"
+        self.killer_moves = [[None,None] for _ in range(100)]
+        self.current_ply = 0
 
     def reset_board(self):
         self.board = chess.Board()
@@ -172,6 +174,8 @@ class ChessAI:
     def minimax(self, depth, alpha, beta, maximizing_player):
         self.nodes_searched += 1
 
+        current_ply = self.current_ply
+
         if self.board.is_repetition(3) or self.board.is_fifty_moves():
             return 0
 
@@ -199,12 +203,17 @@ class ChessAI:
         if maximizing_player:
             max_eval = float("-inf")
             for move in self.order_moves(self.board.legal_moves):
+                self.current_ply = current_ply + 1
+
                 self.board.push(move)
                 eval = self.minimax(depth - 1, alpha, beta, False)
                 self.board.pop()
+                self.current_ply = current_ply
+
                 max_eval = max(max_eval, eval)
                 alpha = max(alpha,eval)
                 if beta <= alpha:
+                    self.add_killer_move(move)
                     break
 
             if max_eval <= original_alpha:
@@ -219,12 +228,18 @@ class ChessAI:
         else:
             min_eval = float("inf")
             for move in self.order_moves(self.board.legal_moves):
+                self.current_ply = current_ply + 1
+
                 self.board.push(move)
                 eval = self.minimax(depth - 1, alpha, beta, True)
                 self.board.pop()
+
+                self.current_ply = current_ply
+                
                 min_eval = min(min_eval, eval)
                 beta = min(beta, eval)
                 if (beta <= alpha):
+                    self.add_killer_move(move)
                     break
 
             if min_eval <= original_alpha:
@@ -285,7 +300,13 @@ class ChessAI:
         scored_moves = []
         for move in moves:
             score = 0
-            if self.board.is_capture(move):
+            if move in self.killer_moves[self.current_ply]:
+                if move == self.killer_moves[self.current_ply][0]:
+                    score = 9000
+                else:
+                    score = 8000
+            
+            elif self.board.is_capture(move):
                 victim_piece = self.board.piece_at(move.to_square)
                 attacker_piece = self.board.piece_at(move.from_square)
                 if victim_piece and attacker_piece:
@@ -319,6 +340,7 @@ class ChessAI:
         return [move for move, _ in scored_moves]
             
     def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0):
+        self.killer_moves = [[None,None] for _ in range(100)]
         book_move = self.get_book_move()
         if book_move:
             print(f"info string book move {book_move.uci()}")
@@ -344,6 +366,7 @@ class ChessAI:
             nps = int(self.nodes_searched /elapsed) if elapsed > 0 else 0
 
             print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}")
+            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}", file=sys.stderr)
 
             if elapsed >= time_limit:
                 break
@@ -592,3 +615,8 @@ class ChessAI:
         center_score = (center_control[chess.WHITE] - center_control[chess.BLACK]) * 2
 
         return mobility_score + center_score
+
+    def add_killer_move(self, move):
+        if not self.board.is_capture(move) and move != self.killer_moves[self.current_ply][0]:
+            self.killer_moves[self.current_ply][1] = self.killer_moves[self.current_ply][0]
+            self.killer_moves[self.current_ply][0] = move

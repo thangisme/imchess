@@ -22,7 +22,7 @@ class UCIEngine:
             if not cmd:
                 continue
 
-            print(f"Received input: {cmd}", file=sys.stderr)
+            # print(f"Received input: {cmd}", file=sys.stderr)
 
             if cmd == "uci":
                 self.uci_command()
@@ -79,8 +79,6 @@ class UCIEngine:
 
         depth = 20
         time_limit = 10.0
-
-        print(f"{depth} {time_limit}", file=sys.stderr)
         
         for i in range(len(parts)):
             if parts[i] == "depth" and i + 1 < len(parts):

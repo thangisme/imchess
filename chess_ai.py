@@ -120,17 +120,35 @@ class ChessAI:
 
                 pos_value = 0
                 if piece.piece_type == chess.PAWN:
-                    pos_value = pawn_table[square]
+                    if piece.color == chess.WHITE:
+                        pos_value = pawn_table[square]
+                    else: 
+                        pos_value = pawn_table[chess.square_mirror(square)]
                 elif piece.piece_type == chess.KNIGHT:
-                    pos_value = knight_table[square]
-                elif piece.piece_type == chess.ROOK:
-                    pos_value = rook_table[square]
+                    if piece.color == chess.WHITE:
+                        pos_value = knight_table[square]
+                    else:
+                        pos_value = knight_table[chess.square_mirror(square)]
                 elif piece.piece_type == chess.BISHOP:
-                    pos_value = bishop_table[square]
+                    if piece.color == chess.WHITE:
+                        pos_value = bishop_table[square]
+                    else:
+                        pos_value = bishop_table[chess.square_mirror(square)]
+                elif piece.piece_type == chess.ROOK:
+                    if piece.color == chess.WHITE:
+                        pos_value = rook_table[square]
+                    else:
+                        pos_value = rook_table[chess.square_mirror(square)]
                 elif piece.piece_type == chess.QUEEN:
-                    pos_value = queen_table[square]
+                    if piece.color == chess.WHITE:
+                        pos_value = queen_table[square]
+                    else:
+                        pos_value = queen_table[chess.square_mirror(square)]
                 elif piece.piece_type == chess.KING:
-                    pos_value = king_middle_game_table[square]    
+                    if piece.color == chess.WHITE:
+                        pos_value = king_middle_game_table[square]
+                    else:
+                        pos_value = king_middle_game_table[chess.square_mirror(square)]
 
                 if piece.color == chess.WHITE:
                     material_score += value
@@ -257,9 +275,9 @@ class ChessAI:
                 score = self.quiescence_search(alpha, beta, True, q_depth + 1)
                 self.board.pop()
 
-                if score >= alpha:
+                if score <= alpha:
                     return alpha
-                alpha = max(beta, score)
+                beta = min(beta, score)
         
         return alpha if maximizing_player else beta
                 
@@ -325,7 +343,7 @@ class ChessAI:
 
             nps = int(self.nodes_searched /elapsed) if elapsed > 0 else 0
 
-            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}", file=sys.stderr)
+            print(f"info depth {current_depth} score cp {self.board_score} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)}")
 
             if elapsed >= time_limit:
                 break
@@ -371,11 +389,9 @@ class ChessAI:
         try:
             with chess.polyglot.open_reader(self.opening_book) as reader:
                 entries = list(reader.find_all(self.board))
-                print(entries, file=sys.stderr)
-
-                print(f"book {self.opening_book}")
 
                 if entries:
+                    print(entries, file=sys.stderr)
                     total = sum(entry.weight for entry in entries)
                     pick = random.randint(1, total)
                     current_sum = 0

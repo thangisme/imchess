@@ -12,6 +12,7 @@ class ChessAI:
         self.opening_book = "baron30.bin"
         self.killer_moves = [[None,None] for _ in range(100)]
         self.current_ply = 0
+        self.current_best_move = None
 
     def reset_board(self):
         self.board = chess.Board()
@@ -171,7 +172,9 @@ class ChessAI:
     def get_board_hash(self):
         return chess.polyglot.zobrist_hash(self.board)
     
-    def minimax(self, depth, alpha, beta, maximizing_player):
+    def minimax(self, depth, alpha, beta, maximizing_player, stop_callback=None):
+        if stop_callback and stop_callback():
+            return 0
         self.nodes_searched += 1
 
         current_ply = self.current_ply
@@ -384,7 +387,10 @@ class ChessAI:
         scored_moves.sort(key=lambda x: x[1], reverse=True)
         return [move for move, _ in scored_moves]
             
-    def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0):
+    def get_current_best_move(self):
+        return self.current_best_move
+    
+    def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0, stop_callback=None):
         self.killer_moves = [[None,None] for _ in range(100)]
         book_move = self.get_book_move()
         if book_move:
@@ -398,9 +404,13 @@ class ChessAI:
 
         legal_moves = list(self.board.legal_moves)
         if len(legal_moves) == 1:
+            self.current_best_move = legal_moves[0]
             return legal_moves[0]
 
         for current_depth in range(1, max_depth + 1):
+            if stop_callback and stop_callback():
+                break
+            
             elapsed = time.time() - start_time
             if elapsed > time_limit * 0.8:
                 break

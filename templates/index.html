@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>ImChess</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/chessboard-1.0.0.min.css">
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>ImChess</h1>
+    </header>
+    <div class="main-content">
+      <div class="column-left">
+        <div class="card">
+          <div class="card-content">
+            <div class="chess-board-container">
+              <div id="board"></div>
+            </div>
+          </div>
+        </div>
+        <div id="timer-card" class="card hidden">
+          <div class="card-content">
+            <div class="timer-container">
+              <div class="timer-label">
+                <span class="icon icon-clock"></span>
+                <span>Timer</span>
+              </div>
+              <div class="timer-clocks">
+                <div id="white-timer" class="timer-clock timer-active">
+                  <div id="white-player-label" class="timer-player">White (Human)</div>
+                  <div id="white-time" class="timer-time">05:00</div>
+                </div>
+                <div id="black-timer" class="timer-clock">
+                  <div id="black-player-label" class="timer-player">Black (Computer)</div>
+                  <div id="black-time" class="timer-time">05:00</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="column-right">
+        <div id="setup-card" class="card">
+          <div class="card-content">
+            <div class="setup-panel">
+              <div class="setup-section">
+                <h2 class="setup-title">Select Game Mode</h2>
+                <div class="radio-group">
+                  <div class="radio-item">
+                    <input type="radio" id="human-vs-computer" name="game-mode" value="human_vs_computer" checked>
+                    <label for="human-vs-computer" class="radio-label">
+                      <span class="icon icon-user"></span> vs <span class="icon icon-cpu"></span>
+                      Human vs Computer
+                    </label>
+                  </div>
+                  <div class="radio-item">
+                    <input type="radio" id="computer-vs-computer" name="game-mode" value="computer_vs_computer">
+                    <label for="computer-vs-computer" class="radio-label">
+                      <span class="icon icon-cpu"></span> vs <span class="icon icon-cpu"></span>
+                      Computer vs Computer
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div class="setup-section">
+                <h2 class="setup-title">Select Time Control</h2>
+                <div class="select-container">
+                  <select id="time-control" class="select">
+                    <option value="60">1 minute</option>
+                    <option value="180">3 minutes</option>
+                    <option value="300" selected>5 minutes</option>
+                    <option value="600">10 minutes</option>
+                    <option value="900">15 minutes</option>
+                    <option value="1800">30 minutes</option>
+                  </select>
+                </div>
+              </div>
+              <button id="start-game-btn" class="button button-primary">Start Game</button>
+            </div>
+          </div>
+        </div>
+        <div id="game-options-card" class="card hidden">
+          <div class="card-content">
+            <h2 class="setup-title">Game Options</h2>
+            <div class="game-options">
+              <button id="new-game-btn" class="button button-primary">
+                <span class="icon icon-plus"></span>
+                New Game
+              </button>
+              <button id="play-again-btn" class="button button-outline">
+                <span class="icon icon-rotate"></span>
+                Play Again
+              </button>
+              <button id="back-to-setup-btn" class="button button-outline">
+                Back to Setup
+              </button>
+            </div>
+            <div id="game-over-notification" class="game-over hidden">
+              <span class="icon icon-trophy"></span>
+              <p class="game-over-title">Game Over</p>
+              <p id="game-over-result" class="game-over-result">White wins!</p>
+            </div>
+            <div id="computer-thinking" class="computer-thinking hidden">
+              <span class="icon icon-cpu thinking-animation"></span>
+              <p>Computer is thinking...</p>
+            </div>
+          </div>
+        </div>
+        <div id="game-status-card" class="card hidden">
+          <div class="card-content">
+            <h2 class="setup-title">Game Status</h2>
+            <div class="game-status">
+              <p class="status-item">
+                <span class="status-label">Mode: </span>
+                <span id="game-mode-display">Human vs Computer</span>
+              </p>
+              <p class="status-item">
+                <span class="status-label">Time Control: </span>
+                <span id="time-control-display">5 minutes</span>
+              </p>
+              <p class="status-item">
+                <span class="status-label">Current Turn: </span>
+                <span id="current-turn-display">White</span>
+              </p>
+              <p class="status-item">
+                <span class="status-label">Move Count: </span>
+                <span id="move-count-display">0</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="/static/js/jquery-3.7.1.min.js"></script>
+  <script src="/static/js/chessboard-1.0.0.min.js"></script>
+  <script src="/static/js/chess.min.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+
+</html>

@@ -22,7 +22,7 @@ class UCIEngine:
                 cmd = input()
             if not cmd:
                 continue
-            print(f"Received input: {cmd}", file=sys.stderr)
+            # print(f"Received input: {cmd}", file=sys.stderr)
             if cmd == "uci":
                 self.uci_command()
             elif cmd == "isready":

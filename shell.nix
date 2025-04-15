@@ -17,6 +17,11 @@ pkgs.mkShell {
       ps.uvicorn
       ps.websockets
       ps.jinja2
+      ps.tensorflow
+      ps.keras
+      ps.zstandard
+      ps.numpy
+      ps.matplotlib
     ]))
     pkgs.pychess
   ];

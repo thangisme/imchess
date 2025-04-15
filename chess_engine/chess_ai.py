@@ -3,9 +3,16 @@ import chess.polyglot
 import random
 import time
 import sys
+import tensorflow as tf
+from tensorflow import keras
+import numpy as np
+import os
+
+NN_MODEL_PATH = "chess_eval.keras"
+NN_SCORE_SCALING_FACTOR = 800.0
 
 class ChessAI:
-    def __init__(self):
+    def __init__(self, evaluation_mode="nn", nn_model_path=NN_MODEL_PATH):
         self.board = chess.Board()
         self.transposition_table = {}
         self.nodes_searched = 0
@@ -13,6 +20,21 @@ class ChessAI:
         self.killer_moves = [[None,None] for _ in range(100)]
         self.current_ply = 0
         self.current_best_move = None
+        self.evaluation_mode = evaluation_mode
+        self.nn_model = None
+        if self.evaluation_mode == "nn":
+            if os.path.exists(nn_model_path):
+                try:
+                    self.nn_model = tf.keras.models.load_model(nn_model_path)
+                    print("NN Model loaded successfully", file=sys.stderr)
+                except Exception as e:
+                    print(f"ERROR: failed to load NN model from {nn_model_path}: {e}", file=sys.stderr)
+                    print("Falling back to 'algo' evaluation mode", file=sys.stderr)
+                    self.evaluation_mode = "algo"
+            else:
+                print("ERROR: NN Model file not found", file=sys.stderr)
+                print("Falling back to 'algo' evaluation mode", file=sys.stderr)
+                self.evaluation_mode = "algo"
 
     def reset_board(self):
         self.board = chess.Board()
@@ -33,6 +55,17 @@ class ChessAI:
         return None
 
     def evaluate_board(self):
+        if self.evaluation_mode == "nn":
+            return self._evaluate_board_nn()
+        elif self.evaluation_mode == "algo":
+            return self._evaluate_board_algo()
+        else:
+            print("Unknown evaluation mode, falling back to 'algo'", file=sys.stderr)
+            self.evaluation_mode = "algo"
+            return self._evaluate_board_algo()
+        return self._evaluate_board_nn()
+        
+    def _evaluate_board_algo(self):
         if self.board.is_checkmate():
             return -10000 if self.board.turn else 10000
 
@@ -485,7 +518,7 @@ class ChessAI:
                 entries = list(reader.find_all(self.board))
 
                 if entries:
-                    print(entries, file=sys.stderr)
+                    # print(entries, file=sys.stderr)
                     total = sum(entry.weight for entry in entries)
                     pick = random.randint(1, total)
                     current_sum = 0
@@ -691,3 +724,47 @@ class ChessAI:
         if not self.board.is_capture(move) and move != self.killer_moves[self.current_ply][0]:
             self.killer_moves[self.current_ply][1] = self.killer_moves[self.current_ply][0]
             self.killer_moves[self.current_ply][0] = move
+
+    def _board_to_vector(self, board):
+        piece_map = {
+            'P' : 1, 'N': 2, 'B': 3, 'R': 4, 'Q': 5, 'K': 6, # WHite pieces
+            'p' : 1, 'n': 2, 'b': 3, 'r': 4, 'q': 5, 'k': 6, # Black pieces
+            '.': 0 # Empty square
+        }
+        # 64 squares + 4 for castling + 1 for turn
+        vector = np.zeros(64 + 4 + 1, dtype=np.float32)
+    
+        for i in range (64):
+            piece = board.piece_at(i)
+            if piece:
+                vector[i] = piece_map[piece.symbol()]
+    
+        vector[64] = 1 if board.has_kingside_castling_rights(chess.WHITE) else 0
+        vector[65] = 1 if board.has_queenside_castling_rights(chess.WHITE) else 0
+        vector[66] = 1 if board.has_kingside_castling_rights(chess.BLACK) else 0
+        vector[67] = 1 if board.has_queenside_castling_rights(chess.BLACK) else 0
+    
+        vector[68] = 1 if board.turn == chess.WHITE else -1
+    
+        return vector
+
+    def _evaluate_board_nn(self):
+        if self.board.is_checkmate():
+            return -10000 if self.board.turn else 10000
+        if self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.is_seventyfive_moves() or self.board.is_fivefold_repetition():
+            return 0
+
+        if self.nn_model is None:
+            print("Error: NN model not available", file=sys.stderr)
+
+        board_vec = self._board_to_vector(self.board)
+
+        input_batch = np.expand_dims(board_vec, axis=0)
+
+        raw_prediction = self.nn_model.predict(input_batch, verbose=0)
+
+        nn_score = raw_prediction[0][0]        
+
+        scaled_score = nn_score * NN_SCORE_SCALING_FACTOR
+
+        return float(scaled_score)

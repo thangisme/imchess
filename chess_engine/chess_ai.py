@@ -22,10 +22,18 @@ class ChessAI:
         self.current_best_move = None
         self.evaluation_mode = evaluation_mode
         self.nn_model = None
+        self.piece_to_plane = {
+            'P': 0, 'N': 1, 'B': 2, 'R': 3, 'Q': 4, 'K': 5,
+            'p': 6, 'n': 7, 'b': 8, 'r': 9, 'q': 10, 'k': 11
+        }
         if self.evaluation_mode == "nn":
             if os.path.exists(nn_model_path):
                 try:
                     self.nn_model = tf.keras.models.load_model(nn_model_path)
+                    self.nn_inference = tf.function(
+                        self.nn_model,
+                        input_signature=[tf.TensorSpec([None, 8, 8, 12], tf.float32)]
+                    )
                     print("NN Model loaded successfully", file=sys.stderr)
                 except Exception as e:
                     print(f"ERROR: failed to load NN model from {nn_model_path}: {e}", file=sys.stderr)
@@ -726,10 +734,6 @@ class ChessAI:
             self.killer_moves[self.current_ply][0] = move
 
     def _board_to_planes(self, board):
-        piece_to_plane = {
-            'P' : 1, 'N': 2, 'B': 3, 'R': 4, 'Q': 5, 'K': 6, # WHite pieces
-            'p' : 6, 'n': 7, 'b': 8, 'r': 9, 'q': 10, 'k': 11, # Black pieces
-        }
         planes = np.zeros((8, 8, 12), dtype=np.float32)
     
         for square in chess.SQUARES:
@@ -737,7 +741,7 @@ class ChessAI:
             if piece:
                 rank = chess.square_rank(square)
                 file = chess.square_file(square)
-                channel = piece_to_plane[piece.symbol()]
+                channel = self.piece_to_plane[piece.symbol()]
                 planes[rank, file, channel] = 1.0
     
         return planes
@@ -751,14 +755,9 @@ class ChessAI:
         if self.nn_model is None:
             print("Error: NN model not available", file=sys.stderr)
 
-        board_vec = self._board_to_planes(self.board)
-
-        input_batch = np.expand_dims(board_vec, axis=0)
-
-        raw_prediction = self.nn_model.predict(input_batch, verbose=0)
-
-        nn_score = raw_prediction[0][0]        
-
-        scaled_score = nn_score * NN_SCORE_SCALING_FACTOR
-
-        return float(scaled_score)
+        board_planes = self._board_to_planes(self.board)
+        batch = tf.expand_dims(board_planes, axis=0)
+        raw = self.nn_inference(batch)
+        score = raw[0][0] * NN_SCORE_SCALING_FACTOR
+        print(f"Neural score: {score}")
+        return float(score)

@@ -22,6 +22,7 @@ pkgs.mkShell {
       ps.zstandard
       ps.numpy
       ps.matplotlib
+      ps.orjson
     ]))
     pkgs.pychess
   ];

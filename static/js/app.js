@@ -5,6 +5,9 @@ let socket = null;
 let gameStarted = false;
 let gameMode = 'human_vs_computer';
 let timeControl = 300; 
+let whiteTimeRemaining = null;
+let blackTimeRemaining = null;
+let timerInterval = null;;
 let moveCount = 0;
 let gameOver = false;
 let computerThinking = false;
@@ -128,6 +131,11 @@ function connectWebSocket(id) {
             game.load(message.fen);
             board.position(message.fen);
             updateStatus();
+            if(!message.is_game_over) {
+                startClock();
+            } else {
+                stopClock();
+            }
             
             if (message.hasOwnProperty('computer_thinking')) {
                 showComputerThinking(message.computer_thinking);
@@ -198,6 +206,7 @@ async function startGame() {
         game = new Chess();
         
         initializeBoard();
+        resetTimers();
         
         connectWebSocket(gameId);
         
@@ -230,6 +239,8 @@ async function resetGame() {
         
         game = new Chess();
         board.position('start');
+
+        resetTimers();
         
         gameOver = false;
         gameOverNotification.classList.add('hidden');
@@ -248,6 +259,8 @@ async function resetGame() {
 function backToSetup() {
     gameStarted = false;
     gameOver = false;
+    
+    stopClock();
     
     if (socket) {
         socket.close();
@@ -278,6 +291,58 @@ function endGame(result) {
     gameOverResult.textContent = result === 'Draw' ? 'Draw!' : `${result} wins!`;
 }
 
+function tickClock() {
+    if (gameOver) {
+        stopClock();
+        return;
+    }
+
+    if (game.turn() === 'w') {
+        whiteTimeRemaining--;
+        if (whiteTimeRemaining <= 0) {
+            whiteTimeRemaining = 0;
+            onTimeOut('White');
+        }
+    } else {
+        blackTimeRemaining--;
+        if (blackTimeRemaining <= 0) {
+            blackTimeRemaining = 0;
+            onTimeOut('Black');
+        }
+    }
+    updateTimerDisplays();
+}
+
+function onTimeOut(losingSide) {
+    stopClock();
+    gameOver = true;
+    if (losingSide === 'White') {
+        endGame('Black');
+    } else {
+        endGame('White');
+    }
+}
+
+function startClock() {
+    if (timerInterval) clearInterval(timerInterval);
+
+    timerInterval = setInterval(tickClock, 1000);
+}
+
+function stopClock() {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+function resetTimers() {
+    stopClock();
+    whiteTimeRemaining = timeControl;
+    blackTimeRemaining = timeControl;
+    updateTimerDisplays();
+}
+
 function formatTime(seconds) {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -285,8 +350,10 @@ function formatTime(seconds) {
 }
 
 function updateTimerDisplays() {
-    whiteTimeDisplay.textContent = formatTime(timeControl);
-    blackTimeDisplay.textContent = formatTime(timeControl);
+    const white = whiteTimeRemaining != null ? whiteTimeRemaining : timeControl;
+    const black = blackTimeRemaining != null ? blackTimeRemaining : timeControl;
+    whiteTimeDisplay.textContent = formatTime(white);
+    blackTimeDisplay.textContent = formatTime(black);
 }
 
 function updatePlayerLabels() {

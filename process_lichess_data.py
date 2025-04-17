@@ -9,34 +9,29 @@ import time
 INPUT_ZST_FILE = "lichess_db_eval.jsonl.zst"
 OUTPUT_NPZ_FILE = "lichess_data_processed.npz"
 
-MAX_POSITIONS_TO_COLLET = 100000000
+MAX_POSITIONS_TO_COLLET = 2000000
 MIN_DEPTH_FILTER = 18
 CP_SCALING_FACTOR = 800
 
-piece_map = {
-    'P' : 1, 'N': 2, 'B': 3, 'R': 4, 'Q': 5, 'K': 6, # WHite pieces
-    'p' : 1, 'n': 2, 'b': 3, 'r': 4, 'q': 5, 'k': 6, # Black pieces
-    '.': 0 # Empty square
+piece_to_plane = {
+    'P': 0, 'N': 1, 'B': 2, 'R': 3, 'Q': 4, 'K': 5,
+    'p': 6, 'n': 7, 'b': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
-def board_to_vector(board):
-    # 64 squares + 4 for castling + 1 for turn
-    vector = np.zeros(64 + 4 + 1, dtype=np.float32)
-
-    for i in range (64):
-        piece = board.piece_at(i)
+def board_to_planes(board):
+    """
+    Converts a chess.Board to an 8x8x12 tensor.
+    Each of the 12 planes corresponds to one piece type for one color.
+    """
+    planes = np.zeros((8, 8, 12), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
         if piece:
-            vector[i] = piece_map[piece.symbol()]
-
-    vector[64] = 1 if board.has_kingside_castling_rights(chess.WHITE) else 0
-    vector[65] = 1 if board.has_queenside_castling_rights(chess.WHITE) else 0
-    vector[66] = 1 if board.has_kingside_castling_rights(chess.BLACK) else 0
-    vector[67] = 1 if board.has_queenside_castling_rights(chess.BLACK) else 0
-
-    vector[68] = 1 if board.turn == chess.WHITE else -1
-
-    return vector
-
+            rank = chess.square_rank(square)
+            file = chess.square_file(square)
+            channel = piece_to_plane[piece.symbol()]
+            planes[rank, file, channel] = 1.0
+    return planes
 
 def normalize_score(score_cp=None, mate_in=None):
     if mate_in is not None:
@@ -47,7 +42,7 @@ def normalize_score(score_cp=None, mate_in=None):
         return 0
 
 if not os.path.exists(INPUT_ZST_FILE):
-    print(f"ERROR: Input file not found")
+    print("ERROR: Input file not found")
     exit()
 
 data_x = []
@@ -58,32 +53,32 @@ position_collected_valid = 0
 lines_read_count = 5
 start_time = time.time()
 
-print(f"Processing up to {MAX_POSITIONS_TO_COLLET} position with minimum depth {MIN_DEPTH_FILTER}")
+print(f"Processing up to {MAX_POSITIONS_TO_COLLET} positions with minimum depth {MIN_DEPTH_FILTER}")
+print("Press Ctrl+C to abort and save progress.")
 
 try:
     with open(INPUT_ZST_FILE, 'rb') as compressed_file:
         dctx = zstd.ZstdDecompressor()
         with dctx.stream_reader(compressed_file) as reader:
             text_stream = io.TextIOWrapper(reader, encoding='utf-8')
-
             for line in text_stream:
                 lines_read_count += 1
-                if not line.strip(): continue # SKip blank lines
+                if not line.strip():
+                    continue  # Skip blank lines
 
                 position_processed_total += 1
 
                 try:
                     pos_data = json.loads(line)
                     fen = pos_data.get("fen")
-                    evals = pos_data.get("evals")
-
-                    if not fen or not evals:
+                    eval_entries = pos_data.get("evals")
+                    if not fen or not eval_entries:
                         continue
 
                     best_eval_entry = None
                     highest_depth_found = -1
 
-                    for eval_entry in evals:
+                    for eval_entry in eval_entries:
                         depth = eval_entry.get("depth", 0)
                         if depth >= MIN_DEPTH_FILTER and depth > highest_depth_found:
                             if eval_entry.get("pvs"):
@@ -94,18 +89,15 @@ try:
                         first_pv = best_eval_entry["pvs"][0]
                         cp = first_pv.get("cp")
                         mate = first_pv.get("mate")
-
                         if cp is not None or mate is not None:
                             normalized_eval = normalize_score(score_cp=cp, mate_in=mate)
-
                             try:
                                 board = chess.Board(fen)
                             except ValueError:
                                 continue
 
-                            board_vec = board_to_vector(board)
-
-                            data_x.append(board_vec)
+                            board_planes = board_to_planes(board)
+                            data_x.append(board_planes)
                             data_y.append(normalized_eval)
                             position_collected_valid += 1
 
@@ -118,28 +110,30 @@ try:
 
                 if position_processed_total % 100000 == 0:
                     elapsed_time = time.time() - start_time
-                    pps = position_processed_total /elapsed_time if elapsed_time > 0 else 0
-                    print(f'''
-                    Lines read: {lines_read_count}, Processed: {position_processed_total}
-                    Collected: {position_collected_valid}/{MAX_POSITIONS_TO_COLLET} ({pps:.1f} pos/sec)
-                    ''')
+                    pps = position_processed_total / elapsed_time if elapsed_time > 0 else 0
+                    print(
+                        f"Lines read: {lines_read_count}, Processed: {position_processed_total}, "
+                        f"Collected: {position_collected_valid}/{MAX_POSITIONS_TO_COLLET} ({pps:.1f} pos/sec)"
+                    )
 
                 if position_collected_valid >= MAX_POSITIONS_TO_COLLET:
                     break
 
+except KeyboardInterrupt:
+    print("Keyboard interruption detected. Saving progress...")
 except Exception as e:
-    print(f"Error processing: {e}")
+    print("An unexpected error occurred:", e)
+finally:
+    if position_collected_valid > 0:
+        x_train = np.array(data_x, dtype=np.float32) 
+        y_train = np.array(data_y, dtype=np.float32) 
+        print(f"Shape of x_train (board planes): {x_train.shape}")
+        print(f"Shape of y_train (evaluations): {y_train.shape}")
 
-if position_collected_valid > 0:
-    x_train = np.array(data_x, dtype=np.float32)
-    y_train = np.array(data_y, dtype=np.float32)
+        np.savez_compressed(OUTPUT_NPZ_FILE, X=x_train, y=y_train)
+        print("Data saved successfully to", OUTPUT_NPZ_FILE)
+    else:
+        print("No valid positions collected to save.")
 
-    print(f"Shape of x_train (board vectors): {x_train.shape}")
-    print(f"Shape of y_train (board vectors): {y_train.shape}")
-
-    np.savez_compressed(OUTPUT_NPZ_FILE, X=x_train, y=y_train)
-    print("Data saved successfully.")
-else:
-    print(f"No valid position collected")
-
-print(f"Total time taken: {time.time() - start_time:.2f}")
+    total_elapsed = time.time() - start_time
+    print(f"Total time taken: {total_elapsed:.2f} seconds")

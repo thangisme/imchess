@@ -725,28 +725,22 @@ class ChessAI:
             self.killer_moves[self.current_ply][1] = self.killer_moves[self.current_ply][0]
             self.killer_moves[self.current_ply][0] = move
 
-    def _board_to_vector(self, board):
-        piece_map = {
+    def _board_to_planes(self, board):
+        piece_to_plane = {
             'P' : 1, 'N': 2, 'B': 3, 'R': 4, 'Q': 5, 'K': 6, # WHite pieces
-            'p' : 1, 'n': 2, 'b': 3, 'r': 4, 'q': 5, 'k': 6, # Black pieces
-            '.': 0 # Empty square
+            'p' : 6, 'n': 7, 'b': 8, 'r': 9, 'q': 10, 'k': 11, # Black pieces
         }
-        # 64 squares + 4 for castling + 1 for turn
-        vector = np.zeros(64 + 4 + 1, dtype=np.float32)
+        planes = np.zeros((8, 8, 12), dtype=np.float32)
     
-        for i in range (64):
-            piece = board.piece_at(i)
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
             if piece:
-                vector[i] = piece_map[piece.symbol()]
+                rank = chess.square_rank(square)
+                file = chess.square_file(square)
+                channel = piece_to_plane[piece.symbol()]
+                planes[rank, file, channel] = 1.0
     
-        vector[64] = 1 if board.has_kingside_castling_rights(chess.WHITE) else 0
-        vector[65] = 1 if board.has_queenside_castling_rights(chess.WHITE) else 0
-        vector[66] = 1 if board.has_kingside_castling_rights(chess.BLACK) else 0
-        vector[67] = 1 if board.has_queenside_castling_rights(chess.BLACK) else 0
-    
-        vector[68] = 1 if board.turn == chess.WHITE else -1
-    
-        return vector
+        return planes
 
     def _evaluate_board_nn(self):
         if self.board.is_checkmate():
@@ -757,7 +751,7 @@ class ChessAI:
         if self.nn_model is None:
             print("Error: NN model not available", file=sys.stderr)
 
-        board_vec = self._board_to_vector(self.board)
+        board_vec = self._board_to_planes(self.board)
 
         input_batch = np.expand_dims(board_vec, axis=0)
 

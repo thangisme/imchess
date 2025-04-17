@@ -1,5 +1,6 @@
-import tensorflow
+import tensorflow as tf
 from tensorflow import keras
+from keras import layers
 import numpy as np
 import os
 import time
@@ -7,17 +8,14 @@ import time
 PROCESSED_DATA_FILE = "lichess_data_processed.npz"
 SAVED_MODEL_FILE = "chess_eval.keras"
 
-HIDDEN_LAYER_1_NEURONS = 256
-HIDDEN_LAYER_2_NEURONS = 128
-
+HIDDEN_KERNELS = 64
 LEARNING_RATE = 0.001
-
 BATCH_SIZE = 1024
 EPOCHS = 20
 VALIDATION_SPLIT = 0.15
 
 if not os.path.exists(PROCESSED_DATA_FILE):
-    print(f"ERROR: Processed data file not found")
+    print("ERROR: Processed data file not found")
     exit()
 
 data = np.load(PROCESSED_DATA_FILE)
@@ -35,20 +33,26 @@ if x_data.shape[0] == 0:
     print("ERROR: NO data found")
     exit()
 
-input_dimension = x_data.shape[1]
-print(f"features per board: {input_dimension}")
+input_shape = x_data.shape[1:]
+print(f"Input shape: {input_shape}")
 
-layers = keras.layers
-model = keras.Sequential(
-    [
-        layers.Input(shape=(input_dimension,), name="Board_Input"),
-        layers.Dense(HIDDEN_LAYER_1_NEURONS, activation="relu", name="Hidden_layer_1"),
-        layers.Dense(HIDDEN_LAYER_2_NEURONS, activation="relu", name="Hidden_layer_2"),
-        layers.Dense(1, activation="tanh", name="Evaluation_Output")
-    ],
-    name="Chess_Evaluator"
-)
+def create_chess_eval_model(input_shape=(8,8, 12)):
+    inputs = keras.Input(shape=input_shape, name="Board_Input")
+    x = layers.Conv2D(64, (3, 3), padding="same", activation="relu")(inputs)
+    x = layers.Conv2D(128, (3, 3), padding="same", activation="relu")(x)
+    x = layers.Conv2D(128, (3, 3), padding="same", activation="relu")(x)
 
+    x = layers.Flatten()(x)
+
+    x = layers.Dense(512, activation="relu")(x)
+    x = layers.Dense(256, activation="relu")(x)
+    x = layers.Dense(128, activation="relu")(x)
+
+    outputs = layers.Dense(1, activation="tanh", name="Evaluation_Output")(x)
+    model = keras.Model(inputs, outputs, name="Chess_Evaluator")
+    return model
+
+model = create_chess_eval_model(input_shape)
 model.summary()
 
 model.compile(

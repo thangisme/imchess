@@ -3,8 +3,8 @@ let game = new Chess();
 let gameId = null;
 let socket = null;
 let gameStarted = false;
-let gameMode = 'human_vs_computer';
-let timeControl = 300; 
+let gameMode = null;
+let timeControl = null; 
 let whiteTimeRemaining = null;
 let blackTimeRemaining = null;
 let timerInterval = null;;
@@ -34,6 +34,29 @@ const gameOverNotification = document.getElementById('game-over-notification');
 const gameOverResult = document.getElementById('game-over-result');
 const computerThinkingIndicator = document.getElementById('computer-thinking');
 
+document.addEventListener('DOMContentLoaded', function() {
+  gameMode = document.querySelector('input[name="game-mode"]:checked').value;
+  timeControl = parseInt(timeControlSelect.value, 10);
+
+  updatePlayerLabels();
+  updateTimerDisplays();
+
+  gameModeRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      gameMode = radio.value;
+      updatePlayerLabels();
+    });
+  });
+  timeControlSelect.addEventListener('change', () => {
+    timeControl = parseInt(timeControlSelect.value, 10);
+    updateTimerDisplays();
+  });
+
+  startGameBtn.addEventListener('click', startGame);
+  newGameBtn.addEventListener('click', startGame);
+  playAgainBtn.addEventListener('click', resetGame);
+  backToSetupBtn.addEventListener('click', backToSetup);
+});
 function initializeBoard() {
     const config = {
         draggable: true,
@@ -179,6 +202,10 @@ function connectWebSocket(id) {
 
 async function startGame() {
     try {
+        gameMode = document.querySelector('input[name="game-mode"]:checked').value;
+        timeControl = parseInt(timeControlSelect.value, 10);
+        resetTimers();
+        
         const response = await fetch('/api/new-game', {
             method: 'POST',
             headers: {
@@ -206,7 +233,6 @@ async function startGame() {
         game = new Chess();
         
         initializeBoard();
-        resetTimers();
         
         connectWebSocket(gameId);
         
@@ -228,6 +254,8 @@ async function resetGame() {
     try {
         if (!gameId) return;
         
+        resetTimers();
+
         const response = await fetch(`/api/games/${gameId}/reset`, {
             method: 'POST'
         });
@@ -239,8 +267,6 @@ async function resetGame() {
         
         game = new Chess();
         board.position('start');
-
-        resetTimers();
         
         gameOver = false;
         gameOverNotification.classList.add('hidden');

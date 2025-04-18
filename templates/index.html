@@ -48,23 +48,20 @@
           <div class="card-content">
             <div class="setup-panel">
               <div class="setup-section">
-                <h2 class="setup-title">Select Game Mode</h2>
-                <div class="radio-group">
-                  <div class="radio-item">
-                    <input type="radio" id="human-vs-computer" name="game-mode" value="human_vs_computer" checked>
-                    <label for="human-vs-computer" class="radio-label">
-                      <span class="icon icon-user"></span> vs <span class="icon icon-cpu"></span>
-                      Human vs Computer
-                    </label>
-                  </div>
-                  <div class="radio-item">
-                    <input type="radio" id="computer-vs-computer" name="game-mode" value="computer_vs_computer">
-                    <label for="computer-vs-computer" class="radio-label">
-                      <span class="icon icon-cpu"></span> vs <span class="icon icon-cpu"></span>
-                      Computer vs Computer
-                    </label>
-                  </div>
-                </div>
+                <h2 class="setup-title">White side</h2>
+                <select id="white-side" class="select">
+                  <option value="human">Human</option>
+                  <option value="algo">Computer (Algo)</option>
+                  <option value="nn">Computer (Neural)</option>
+                </select>
+              </div>
+              <div class="setup-section">
+                <h2 class="setup-title">Black side</h2>
+                <select id="black-side" class="select">
+                  <option value="human">Human</option>
+                  <option value="algo">Computer (Algo)</option>
+                  <option value="nn">Computer (Neural)</option>
+                </select>
               </div>
               <div class="setup-section">
                 <h2 class="setup-title">Select Time Control</h2>

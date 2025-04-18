@@ -434,7 +434,7 @@ class ChessAI:
     def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0, stop_callback=None):
         self.killer_moves = [[None,None] for _ in range(100)]
         book_move = self.get_book_move()
-        if book_move:
+        if self.evaluation_mode == 'algo' and book_move:
             print(f"info string book move {book_move.uci()}")
             self.board_score = 0
             return book_move

@@ -842,7 +842,7 @@ class ChessAI:
     def get_current_best_move(self):
         return self.current_best_move
 
-    def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0):
+    def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0, external_stop_callback=None):
         self.killer_moves = [[None, None] for _ in range(100)]
         book_move = self.get_book_move()
         if self.evaluation_mode == "algo" and book_move:
@@ -854,7 +854,11 @@ class ChessAI:
         self.stop_time = start_time + time_limit
 
         def stop_callback():
-            return time.time() >= self.stop_time
+            if time.time() >= self.stop_time:
+                return True
+            if external_stop_callback and external_stop_callback():
+                return True
+            return False
 
         best_move = None
         self.nodes_searched = 0

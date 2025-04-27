@@ -7,7 +7,8 @@ import numpy as np
 import zstandard as zstd
 
 INPUT_ZST_FILE = "lichess_db_eval.jsonl.zst"
-MAX_POSITIONS_TO_COLLECT = 2_000_000
+MAX_POSITIONS_TO_COLLECT = 3_000_000
+TARGET_PER_PHASE = MAX_POSITIONS_TO_COLLECT // 3
 MIN_DEPTH_FILTER = 18
 CP_SCALING_FACTOR = 800
 
@@ -30,6 +31,16 @@ PIECE_TO_PLANE = {
     "k": 11,
 }
 
+count_open, count_mid, count_end = 0, 0, 0
+
+def classify_phase(planes):
+    pieces_count = int(planes.sum())
+    if pieces_count >= 26:
+        return "open"
+    elif pieces_count <= 10:
+        return "end"
+    else:
+        return "mid"
 
 def normalize_score(cp, mate):
     if mate is not None:
@@ -79,6 +90,9 @@ with open(INPUT_ZST_FILE, "rb") as compressed_file:
     with decompressor.stream_reader(compressed_file) as stream_reader:
         text_reader = io.TextIOWrapper(stream_reader, encoding="utf-8")
         for line in text_reader:
+            if (count_end + count_mid + count_end) >= TARGET_PER_PHASE * 3:
+                break
+
             total_lines_processed += 1
             if not line.strip():
                 continue
@@ -118,9 +132,24 @@ with open(INPUT_ZST_FILE, "rb") as compressed_file:
             except:
                 continue
 
+            phase = classify_phase(board_planes)
+            if phase == "open" and count_open >= TARGET_PER_PHASE:
+                continue
+            if phase == "mid" and count_mid >= TARGET_PER_PHASE:
+                continue
+            if phase == "end" and count_end >= TARGET_PER_PHASE:
+                continue
+
             board_memmap[total_positions_collected] = board_planes
             score_memmap[total_positions_collected] = np.float16(normalized_value)
             total_positions_collected += 1
+
+            if phase == "open":
+                count_open += 1
+            if phase == "mid":
+                count_mid += 1
+            if phase == "end":
+                count_end += 1
 
             if total_positions_collected >= MAX_POSITIONS_TO_COLLECT:
                 break
@@ -130,7 +159,7 @@ with open(INPUT_ZST_FILE, "rb") as compressed_file:
                 rate = total_lines_processed / elapsed
                 print(
                     f"Lines read: {total_lines_processed:,}; "
-                    f"Collected: {total_positions_collected:,}; "
+                    f"Collected: {total_positions_collected:,}; Open={count_open}; Mid={count_mid}; End={count_end}; "
                     f"{rate:.1f} lines/sec"
                 )
 

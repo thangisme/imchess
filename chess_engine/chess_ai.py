@@ -1166,7 +1166,7 @@ class ChessAI:
             self.killer_moves[self.current_ply][0] = move
 
     def _board_to_planes(self, board):
-        planes = np.zeros((8, 8, 12), dtype=np.float32)
+        planes = np.zeros((8, 8, 13), dtype=np.float32)
 
         for square in chess.SQUARES:
             piece = board.piece_at(square)
@@ -1175,6 +1175,9 @@ class ChessAI:
                 file = chess.square_file(square)
                 channel = self.piece_to_plane[piece.symbol()]
                 planes[rank, file, channel] = 1.0
+
+        if board.turn == chess.BLACK:
+            planes[:, :, 12] = 1.0
 
         return planes
 
@@ -1210,7 +1213,7 @@ class ChessAI:
         else:
             return self._evaluate_board_algo()
 
-        score = raw[0][0] * NN_SCORE_SCALING_FACTOR
+        score = raw * NN_SCORE_SCALING_FACTOR
         # print(f"Neural score: {score}")
         self.transposition_tablep[hash] = (0, score, "EXACT")
         return float(score)

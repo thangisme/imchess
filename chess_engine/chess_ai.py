@@ -1215,5 +1215,5 @@ class ChessAI:
 
         score = raw * NN_SCORE_SCALING_FACTOR
         # print(f"Neural score: {score}")
-        self.transposition_tablep[hash] = (0, score, "EXACT")
+        self.transposition_table[hash] = (0, score, "EXACT")
         return float(score)

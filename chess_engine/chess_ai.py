@@ -30,7 +30,6 @@ class ChessAI:
         self.current_best_move = None
         self.evaluation_mode = evaluation_mode
         self.nn_backend = None
-        self.nn_session = ort.InferenceSession("")
         self.piece_to_plane = {
             "P": 0,
             "N": 1,
@@ -1199,7 +1198,7 @@ class ChessAI:
                 return stored_value
 
         board_planes = self._board_to_planes(self.board)
-        batch = tf.expand_dims(board_planes, axis=0)
+        batch = np.expand_dims(board_planes, axis=0).astype(np.float32)
 
         if self.nn_backend == "onnx":
             out = self.onnx_session.run(None, {self.onnx_input_name: batch})

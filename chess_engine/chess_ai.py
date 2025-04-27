@@ -14,6 +14,10 @@ NN_SCORE_SCALING_FACTOR = 800.0
 ONNX_MODEL_PATH = "chess_eval.onnx"
 
 
+class SearchTimeout(Exception):
+    pass
+
+
 class ChessAI:
     def __init__(
         self,
@@ -580,7 +584,7 @@ class ChessAI:
 
     def minimax(self, depth, alpha, beta, maximizing_player, stop_callback=None):
         if stop_callback and stop_callback():
-            return 0
+            raise SearchTimeout()
         self.nodes_searched += 1
 
         current_ply = self.current_ply
@@ -607,7 +611,9 @@ class ChessAI:
             return self.evaluate_board()
 
         if depth == 0:
-            return self.quiescence_search(alpha, beta, maximizing_player)
+            return self.quiescence_search(
+                alpha, beta, maximizing_player, stop_callback=stop_callback
+            )
 
         original_alpha = alpha
 
@@ -617,6 +623,9 @@ class ChessAI:
         if maximizing_player:
             max_eval = float("-inf")
             for move in moves:
+                if stop_callback and stop_callback():
+                    raise SearchTimeout()
+
                 is_check = self.board.is_check()
                 gives_check = False
                 self.board.push(move)
@@ -638,14 +647,18 @@ class ChessAI:
                     reduced_depth = depth - 2
 
                     self.board.push(move)
-                    eval = -self.minimax(reduced_depth, -beta, -alpha, False)
+                    eval = -self.minimax(
+                        reduced_depth, -beta, -alpha, False, stop_callback=stop_callback
+                    )
                     self.board.pop()
 
                     do_full_depth = eval > alpha
 
                 if do_full_depth:
                     self.board.push(move)
-                    eval = self.minimax(depth - 1, alpha, beta, False)
+                    eval = self.minimax(
+                        depth - 1, alpha, beta, False, stop_callback=stop_callback
+                    )
                     self.board.pop()
 
                 self.current_ply = current_ply
@@ -720,7 +733,12 @@ class ChessAI:
 
             return min_eval
 
-    def quiescence_search(self, alpha, beta, maximizing_player, q_depth=0):
+    def quiescence_search(
+        self, alpha, beta, maximizing_player, stop_callback=None, q_depth=0
+    ):
+        if stop_callback and stop_callback():
+            raise SearchTimeout()
+
         self.nodes_searched += 1
 
         MAX_QDEPTH = 8
@@ -748,8 +766,13 @@ class ChessAI:
 
         if maximizing_player:
             for move in captures:
+                if stop_callback and stop_callback():
+                    raise SearchTimeout()
+
                 self.board.push(move)
-                score = self.quiescence_search(alpha, beta, False, q_depth + 1)
+                score = self.quiescence_search(
+                    alpha, beta, False, stop_callback=stop_callback, q_depth=q_depth + 1
+                )
                 self.board.pop()
 
                 if score >= beta:
@@ -758,7 +781,9 @@ class ChessAI:
         else:
             for move in captures:
                 self.board.push(move)
-                score = self.quiescence_search(alpha, beta, True, q_depth + 1)
+                score = self.quiescence_search(
+                    alpha, beta, True, stop_callback=stop_callback, q_depth=q_depth + 1
+                )
                 self.board.pop()
 
                 if score <= alpha:
@@ -817,9 +842,7 @@ class ChessAI:
     def get_current_best_move(self):
         return self.current_best_move
 
-    def get_best_move_iterative_deepening(
-        self, max_depth=4, time_limit=5.0, stop_callback=None
-    ):
+    def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0):
         self.killer_moves = [[None, None] for _ in range(100)]
         book_move = self.get_book_move()
         if self.evaluation_mode == "algo" and book_move:
@@ -828,6 +851,11 @@ class ChessAI:
             return book_move
 
         start_time = time.time()
+        self.stop_time = start_time + time_limit
+
+        def stop_callback():
+            return time.time() >= self.stop_time
+
         best_move = None
         self.nodes_searched = 0
 
@@ -845,7 +873,11 @@ class ChessAI:
                 break
 
             # self.transposition_table = {}
-            move = self.get_best_move(current_depth)
+            try:
+                move = self.get_best_move(current_depth, stop_callback=stop_callback)
+            except SearchTimeout:
+                break
+
             elapsed = time.time() - start_time
 
             if move:
@@ -880,7 +912,7 @@ class ChessAI:
 
         return best_move
 
-    def get_best_move(self, depth=3):
+    def get_best_move(self, depth=3, stop_callback=None):
         best_move = None
         best_value = float("-inf") if self.board.turn == chess.WHITE else float("inf")
         alpha = float("-inf")
@@ -889,12 +921,19 @@ class ChessAI:
         self.board_score = 0
 
         for move in self.order_moves(self.board.legal_moves):
+            if stop_callback and stop_callback():
+                raise SearchTimeout()
+
             self.board.push(move)
 
             if self.board.turn == chess.WHITE:
-                board_value = self.minimax(depth - 1, alpha, beta, True)
+                board_value = self.minimax(
+                    depth - 1, alpha, beta, True, stop_callback=stop_callback
+                )
             else:
-                board_value = self.minimax(depth - 1, alpha, beta, False)
+                board_value = self.minimax(
+                    depth - 1, alpha, beta, False, stop_callback=stop_callback
+                )
 
             self.board.pop()
 

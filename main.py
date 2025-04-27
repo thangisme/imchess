@@ -223,7 +223,7 @@ async def make_computer_move(game_id:str, color:bool):
         move = await loop.run_in_executor(
             None,
             lambda: ai.get_best_move_iterative_deepening(
-                5, 10.0, stop_callback=lambda: game_session.stop_requested
+                5, 10.0, external_stop_callback=lambda: game_session.stop_requested
             ),
         )
 

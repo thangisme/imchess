@@ -16,6 +16,8 @@ BOARD_MEMMAP_FILENAME = "board_states.dat"
 SCORE_MEMMAP_FILENAME = "eval_scores.dat"
 COUNT_FILENAME = "valid_positions_count.txt"
 
+N_PLANES = 13  # 12 pieces + 1 side-to-move plane
+
 PIECE_TO_PLANE = {
     "P": 0,
     "N": 1,
@@ -33,6 +35,7 @@ PIECE_TO_PLANE = {
 
 count_open, count_mid, count_end = 0, 0, 0
 
+
 def classify_phase(planes):
     pieces_count = int(planes.sum())
     if pieces_count >= 26:
@@ -42,6 +45,7 @@ def classify_phase(planes):
     else:
         return "mid"
 
+
 def normalize_score(cp, mate):
     if mate is not None:
         return 1.0 if mate > 0 else -1.0
@@ -49,17 +53,23 @@ def normalize_score(cp, mate):
 
 
 def fen_to_uint8_planes(fen):
-    planes = np.zeros((8, 8, 12), dtype=np.uint8)
-    rows = fen.split()[0].split("/")
-    for rank_index, row in enumerate(rows):
-        file_index = 0
-        for char in row:
-            if char.isdigit():
-                file_index += int(char)
+    parts = fen.split()
+    board, stm = parts[0], parts[1]
+    planes = np.zeros((8, 8, N_PLANES), dtype=np.uint8)
+
+    rows = board.split("/")
+    for r, row in enumerate(rows):
+        f = 0
+        for ch in row:
+            if ch.isdigit():
+                f += int(ch)
             else:
-                plane_index = PIECE_TO_PLANE[char]
-                planes[rank_index, file_index, plane_index] = 1
-                file_index += 1
+                planes[r, f, PIECE_TO_PLANE[ch]] = 1
+                f += 1
+
+    if stm == "b":
+        planes[:, :, 12] = 1
+
     return planes
 
 
@@ -72,7 +82,7 @@ board_memmap = np.memmap(
     BOARD_MEMMAP_FILENAME,
     mode="w+",
     dtype=np.uint8,
-    shape=(MAX_POSITIONS_TO_COLLECT, 8, 8, 12),
+    shape=(MAX_POSITIONS_TO_COLLECT, 8, 8, N_PLANES),
 )
 score_memmap = np.memmap(
     SCORE_MEMMAP_FILENAME,
@@ -90,7 +100,7 @@ with open(INPUT_ZST_FILE, "rb") as compressed_file:
     with decompressor.stream_reader(compressed_file) as stream_reader:
         text_reader = io.TextIOWrapper(stream_reader, encoding="utf-8")
         for line in text_reader:
-            if (count_end + count_mid + count_end) >= TARGET_PER_PHASE * 3:
+            if (count_open + count_mid + count_end) >= TARGET_PER_PHASE * 3:
                 break
 
             total_lines_processed += 1

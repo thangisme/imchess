@@ -31,43 +31,38 @@ evaluation_scores = np.memmap(
     shape=(total_number_of_positions,),
 )
 
-dataset_all_positions = tf.data.Dataset.from_tensor_slices(
+dataset_all = tf.data.Dataset.from_tensor_slices(
     (board_states, evaluation_scores)
 )
 
-number_of_validation_positions = int(
-    total_number_of_positions * VALIDATION_SPLIT_FRACTION
-)
-number_of_training_positions = (
-    total_number_of_positions - number_of_validation_positions
+dataset_all = dataset_all.shuffle(
+    buffer_size=total_number_of_positions,
+    reshuffle_each_iteration=True
 )
 
-dataset_shuffled_once = dataset_all_positions.shuffle(
-    buffer_size=total_number_of_positions
-).repeat()
+val_size   = int(total_number_of_positions * VALIDATION_SPLIT_FRACTION)
+train_size = total_number_of_positions - val_size
 
-validation_raw_dataset = dataset_shuffled_once.take(number_of_validation_positions)
-training_raw_dataset = dataset_shuffled_once.skip(number_of_validation_positions)
-
+validation_ds = dataset_all.take(val_size)
+training_ds   = dataset_all.skip(val_size)
 
 def cast_to_float32(board_uint8, score_float16):
-    board_float32 = tf.cast(board_uint8, tf.float32)
-    score_float32 = tf.cast(score_float16, tf.float32)
-    return board_float32, score_float32
-
+    return (tf.cast(board_uint8, tf.float32),
+            tf.cast(score_float16, tf.float32))
 
 training_dataset = (
-    training_raw_dataset.map(cast_to_float32, num_parallel_calls=tf.data.AUTOTUNE)
-    .batch(BATCH_SIZE)
-    .prefetch(tf.data.AUTOTUNE)
+    training_ds
+      .map(cast_to_float32, num_parallel_calls=tf.data.AUTOTUNE)
+      .batch(BATCH_SIZE)
+      .prefetch(tf.data.AUTOTUNE)
 )
 
 validation_dataset = (
-    validation_raw_dataset.map(cast_to_float32, num_parallel_calls=tf.data.AUTOTUNE)
-    .batch(BATCH_SIZE)
-    .prefetch(tf.data.AUTOTUNE)
+    validation_ds
+      .map(cast_to_float32, num_parallel_calls=tf.data.AUTOTUNE)
+      .batch(BATCH_SIZE)
+      .prefetch(tf.data.AUTOTUNE)
 )
-
 
 def build_chess_evaluator_model(input_shape=(8, 8, 13)):
     inputs = keras.Input(shape=input_shape, name="board_input")

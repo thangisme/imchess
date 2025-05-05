@@ -701,7 +701,7 @@ class ChessAI:
                     and not gives_check
                     and not self.board.is_capture(move)
                 ):
-                    reduced_depth = depth = 2
+                    reduced_depth = depth - 2
 
                     self.board.push(move)
                     eval = -self.minimax(reduced_depth, -beta, -alpha, True)
@@ -842,7 +842,9 @@ class ChessAI:
     def get_current_best_move(self):
         return self.current_best_move
 
-    def get_best_move_iterative_deepening(self, max_depth=4, time_limit=5.0, external_stop_callback=None):
+    def get_best_move_iterative_deepening(
+        self, max_depth=4, time_limit=5.0, external_stop_callback=None
+    ):
         self.killer_moves = [[None, None] for _ in range(100)]
         book_move = self.get_book_move()
         if self.evaluation_mode == "algo" and book_move:
@@ -1246,6 +1248,8 @@ class ChessAI:
         board_planes = self._board_to_planes(self.board)
         batch = np.expand_dims(board_planes, axis=0).astype(np.float32)
 
+        MAX_CP = 5000.0
+
         if self.nn_backend == "onnx":
             out = self.onnx_session.run(None, {self.onnx_input_name: batch})
             raw = float(out[0][0, 0])
@@ -1256,7 +1260,8 @@ class ChessAI:
         else:
             return self._evaluate_board_algo()
 
-        score = raw * NN_SCORE_SCALING_FACTOR
+        score = raw * MAX_CP
+        score = max(-MAX_CP, min(MAX_CP, score))
         # print(f"Neural score: {score}")
         self.transposition_table[hash] = (0, score, "EXACT")
         return float(score)

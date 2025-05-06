@@ -12,8 +12,10 @@
     <header>
       <h1>ImChess</h1>
     </header>
+
     <div class="main-content">
       <div class="column-left">
+        <!-- Chess Board -->
         <div class="card">
           <div class="card-content">
             <div class="chess-board-container">
@@ -21,6 +23,8 @@
             </div>
           </div>
         </div>
+
+        <!-- Timer Card -->
         <div id="timer-card" class="card hidden">
           <div class="card-content">
             <div class="timer-container">
@@ -34,7 +38,7 @@
                   <div id="white-time" class="timer-time">05:00</div>
                 </div>
                 <div id="black-timer" class="timer-clock">
-                  <div id="black-player-label" class="timer-player">Black (Computer)</div>
+                  <div id="black-player-label" class="timer-player">Black (Neural Network)</div>
                   <div id="black-time" class="timer-time">05:00</div>
                 </div>
               </div>
@@ -44,6 +48,7 @@
       </div>
 
       <div class="column-right">
+        <!-- Game Setup -->
         <div id="setup-card" class="card">
           <div class="card-content">
             <div class="setup-panel">
@@ -51,16 +56,14 @@
                 <h2 class="setup-title">White side</h2>
                 <select id="white-side" class="select">
                   <option value="human">Human</option>
-                  <option value="algo">Computer (Algo)</option>
-                  <option value="nn">Computer (Neural)</option>
+                  <option value="nn_policy">Neural Network</option>
                 </select>
               </div>
               <div class="setup-section">
                 <h2 class="setup-title">Black side</h2>
                 <select id="black-side" class="select">
                   <option value="human">Human</option>
-                  <option value="algo">Computer (Algo)</option>
-                  <option value="nn">Computer (Neural)</option>
+                  <option value="nn_policy" selected>Neural Network</option>
                 </select>
               </div>
               <div class="setup-section">
@@ -80,6 +83,8 @@
             </div>
           </div>
         </div>
+
+        <!-- Game Options -->
         <div id="game-options-card" class="card hidden">
           <div class="card-content">
             <h2 class="setup-title">Game Options</h2>
@@ -107,13 +112,15 @@
             </div>
           </div>
         </div>
+
+        <!-- Game Status -->
         <div id="game-status-card" class="card hidden">
           <div class="card-content">
             <h2 class="setup-title">Game Status</h2>
             <div class="game-status">
               <p class="status-item">
                 <span class="status-label">Mode: </span>
-                <span id="game-mode-display">Human vs Computer</span>
+                <span id="game-mode-display">Human vs Neural Network</span>
               </p>
               <p class="status-item">
                 <span class="status-label">Time Control: </span>
@@ -133,6 +140,8 @@
       </div>
     </div>
   </div>
+
+  <!-- Scripts -->
   <script src="/static/js/jquery-3.7.1.min.js"></script>
   <script src="/static/js/chessboard-1.0.0.min.js"></script>
   <script src="/static/js/chess.min.js"></script>

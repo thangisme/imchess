@@ -1,425 +1,432 @@
-let board = null;
-let game = new Chess();
-let gameId = null;
-let socket = null;
-let gameStarted = false;
-let whiteSide = 'human';
-let blackSide = 'algo';
-let timeControl = null;
-let whiteTimeRemaining = null;
-let blackTimeRemaining = null;
-let timerInterval = null;;
-let moveCount = 0;
-let gameOver = false;
-let computerThinking = false;
+class ChessGame {
+  constructor() {
+    this.board = null;
+    this.game = new Chess();
+    this.gameId = null;
+    this.socket = null;
+    
+    this.whiteSide = 'human';
+    this.blackSide = 'nn_policy';
+    this.timeControl = 300; 
+    
+    this.gameStarted = false;
+    this.gameOver = false;
+    this.computerThinking = false;
+    this.whiteTimeRemaining = null;
+    this.blackTimeRemaining = null;
+    this.timerInterval = null;
+    this.moveCount = 0;
 
-const setupCard = document.getElementById('setup-card');
-const gameOptionsCard = document.getElementById('game-options-card');
-const gameStatusCard = document.getElementById('game-status-card');
-const timerCard = document.getElementById('timer-card');
-const startGameBtn = document.getElementById('start-game-btn');
-const newGameBtn = document.getElementById('new-game-btn');
-const playAgainBtn = document.getElementById('play-again-btn');
-const backToSetupBtn = document.getElementById('back-to-setup-btn');
-const timeControlSelect = document.getElementById('time-control');
-const whiteTimeDisplay = document.getElementById('white-time');
-const blackTimeDisplay = document.getElementById('black-time');
-const whitePlayerLabel = document.getElementById('white-player-label');
-const blackPlayerLabel = document.getElementById('black-player-label');
-const gameModeDisplay = document.getElementById('game-mode-display');
-const timeControlDisplay = document.getElementById('time-control-display');
-const currentTurnDisplay = document.getElementById('current-turn-display');
-const moveCountDisplay = document.getElementById('move-count-display');
-const gameOverNotification = document.getElementById('game-over-notification');
-const gameOverResult = document.getElementById('game-over-result');
-const computerThinkingIndicator = document.getElementById('computer-thinking');
-const whiteSideSelect = document.getElementById('white-side');
-const blackSideSelect = document.getElementById('black-side');
-
-function initializeBoard() {
-  const config = {
-    draggable: true,
-    position: 'start',
-    onDragStart: onDragStart,
-    onDrop: onDrop,
-    onSnapEnd: onSnapEnd,
-    pieceTheme: '/static/img/chesspieces/wikipedia/{piece}.png',
-    orientation: getBoardOrientation()
-  };
-  board = Chessboard('board', config);
-  updateStatus();
-  $(window).resize(() => board.resize());
-}
-
-function onDragStart(source, piece) {
-  if (game.game_over()) return false;
-
-  if (whiteSide != 'human' && blackSide != 'human') return false;
-
-  if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
-    (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
-    return false;
+    this.initDomElements();
+    
+    this.setupEventListeners();
   }
 
-  if (computerThinking) {
-    return false;
-  }
-}
-
-function onDrop(source, target) {
-  const move = game.move({
-    from: source,
-    to: target,
-    promotion: 'q'
-  });
-
-  if (move === null) return 'snapback';
-
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({
-      type: 'make_move',
-      move: move.from + move.to + (move.promotion || '')
-    }));
-  }
-
-  updateStatus();
-}
-
-function onSnapEnd() {
-  board.position(game.fen());
-}
-
-function updateStatus() {
-  let status = '';
-
-  if (game.in_checkmate()) {
-    status = `Game over: ${game.turn() === 'w' ? 'Black' : 'White'} wins by checkmate`;
-    endGame(game.turn() === 'w' ? 'Black' : 'White');
-  } else if (game.in_draw()) {
-    status = 'Game over: Draw';
-    endGame('Draw');
-  } else {
-    status = `${game.turn() === 'w' ? 'White' : 'Black'} to move`;
-    if (game.in_check()) {
-      status += `, ${game.turn() === 'w' ? 'White' : 'Black'} is in check`;
-    }
+  initDomElements() {
+    this.setupCard = document.getElementById('setup-card');
+    this.gameOptionsCard = document.getElementById('game-options-card');
+    this.gameStatusCard = document.getElementById('game-status-card');
+    this.timerCard = document.getElementById('timer-card');
+    
+    this.startGameBtn = document.getElementById('start-game-btn');
+    this.newGameBtn = document.getElementById('new-game-btn');
+    this.playAgainBtn = document.getElementById('play-again-btn');
+    this.backToSetupBtn = document.getElementById('back-to-setup-btn');
+    
+    this.timeControlSelect = document.getElementById('time-control');
+    this.whiteTimeDisplay = document.getElementById('white-time');
+    this.blackTimeDisplay = document.getElementById('black-time');
+    this.whitePlayerLabel = document.getElementById('white-player-label');
+    this.blackPlayerLabel = document.getElementById('black-player-label');
+    this.whiteSideSelect = document.getElementById('white-side');
+    this.blackSideSelect = document.getElementById('black-side');
+    
+    this.gameModeDisplay = document.getElementById('game-mode-display');
+    this.timeControlDisplay = document.getElementById('time-control-display');
+    this.currentTurnDisplay = document.getElementById('current-turn-display');
+    this.moveCountDisplay = document.getElementById('move-count-display');
+    this.gameOverNotification = document.getElementById('game-over-notification');
+    this.gameOverResult = document.getElementById('game-over-result');
+    this.computerThinkingIndicator = document.getElementById('computer-thinking');
   }
 
-  currentTurnDisplay.textContent = game.turn() === 'w' ? 'White' : 'Black';
-
-  if (game.turn() === 'w') {
-    document.getElementById('white-timer').classList.add('timer-active');
-    document.getElementById('black-timer').classList.remove('timer-active');
-  } else {
-    document.getElementById('white-timer').classList.remove('timer-active');
-    document.getElementById('black-timer').classList.add('timer-active');
-  }
-}
-
-function connectWebSocket(id) {
-  socket = new WebSocket(`ws://${window.location.host}/ws/${id}`);
-
-  socket.onopen = function(event) {
-    console.log('WebSocket connection established');
-  };
-
-  socket.onmessage = function(event) {
-    const message = JSON.parse(event.data);
-    console.log(message);
-
-    if (message.type === 'board_update') {
-      game.load(message.fen);
-      board.position(message.fen);
-      board.orientation(getBoardOrientation())
-      updateMoveCountFromFEN(message.fen);
-      updateStatus();
-      if (!message.is_game_over) {
-        startClock();
-      } else {
-        stopClock();
-      }
-
-      if (message.hasOwnProperty('computer_thinking')) {
-        showComputerThinking(message.computer_thinking);
-      }
-
-      if (message.is_game_over) {
-        let resultMessage = 'Game over: ';
-        if (message.result === 'checkmate') {
-          resultMessage += `${message.winner} wins by checkmate`;
-          endGame(message.winner);
-        } else if (message.result === 'stalemate') {
-          resultMessage += 'Draw by stalemate';
-          endGame('Draw');
-        } else if (message.result === 'insufficient material') {
-          resultMessage += 'Draw by insufficient material';
-          endGame('Draw');
-        } else if (message.result === 'fifty-move rule') {
-          resultMessage += 'Draw by fifty-move rule';
-          endGame('Draw');
-        } else if (message.result === 'threefold repetition') {
-          resultMessage += 'Draw by threefold repetition';
-          endGame('Draw');
-        } else {
-          resultMessage += 'Draw';
-          endGame('Draw');
-        }
-      }
-    } else if (message.hasOwnProperty('computer_thinking')) {
-      showComputerThinking(message.computer_thinking);
-    }
-  };
-
-  socket.onclose = function(event) {
-    console.log('WebSocket connection closed');
-  };
-
-  socket.onerror = function(error) {
-    console.error('WebSocket error:', error);
-  };
-}
-
-async function startGame() {
-  try {
-    whiteSide = whiteSideSelect.value;
-    blackSide = blackSideSelect.value;
-    timeControl = parseInt(timeControlSelect.value, 10);
-    resetTimers();
-
-    const response = await fetch('/api/new-game', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        time_control: timeControl,
-        white_side: whiteSide,
-        black_side: blackSide
-      })
+  setupEventListeners() {
+    this.timeControl = parseInt(this.timeControlSelect.value, 10);
+    this.updatePlayerLabels();
+    this.updateTimerDisplays();
+    
+    this.whiteSideSelect.addEventListener('change', () => {
+      this.whiteSide = this.whiteSideSelect.value;
+      this.updatePlayerLabels();
     });
+    
+    this.blackSideSelect.addEventListener('change', () => {
+      this.blackSide = this.blackSideSelect.value;
+      this.updatePlayerLabels();
+    });
+    
+    this.timeControlSelect.addEventListener('change', () => {
+      this.timeControl = parseInt(this.timeControlSelect.value, 10);
+      this.updateTimerDisplays();
+    });
+    
+    this.startGameBtn.addEventListener('click', () => this.startGame());
+    this.newGameBtn.addEventListener('click', () => this.startGame());
+    this.playAgainBtn.addEventListener('click', () => this.resetGame());
+    this.backToSetupBtn.addEventListener('click', () => this.backToSetup());
+  }
 
-    if (!response.ok) {
-      throw new Error('Failed to create game');
-    }
-
-    const data = await response.json();
-    gameId = data.game_id;
-
-    setupCard.classList.add('hidden');
-    gameOptionsCard.classList.remove('hidden');
-    gameStatusCard.classList.remove('hidden');
-    timerCard.classList.remove('hidden');
-    gameOverNotification.classList.add('hidden');
-    computerThinkingIndicator.classList.add('hidden');
-
-    gameStarted = true;
-    gameOver = false;
-    game = new Chess();
-
-    initializeBoard();
-
-    connectWebSocket(gameId);
-
-
-    const map = {
-      human: 'Human',
-      algo: 'Computer (Algo)',
-      nn: 'Computer (NN)'
+  initializeBoard() {
+    const config = {
+      draggable: true,
+      position: 'start',
+      onDragStart: (source, piece) => this.onDragStart(source, piece),
+      onDrop: (source, target) => this.onDrop(source, target),
+      onSnapEnd: () => this.onSnapEnd(),
+      pieceTheme: '/static/img/chesspieces/wikipedia/{piece}.png',
+      orientation: this.getBoardOrientation()
     };
-    gameModeDisplay.textContent = map[whiteSide] + ' vs ' + map[blackSide];
-    timeControlDisplay.textContent = timeControlSelect.options[timeControlSelect.selectedIndex].text;
-    currentTurnDisplay.textContent = 'White';
-    moveCountDisplay.textContent = '0';
-
-    updatePlayerLabels();
-
-    updateTimerDisplays();
-  } catch (error) {
-    console.error('Error starting game:', error);
-    alert('Failed to start game');
+    
+    this.board = Chessboard('board', config);
+    this.updateStatus();
+    
+    $(window).resize(() => this.board.resize());
   }
-}
 
-async function resetGame() {
-  try {
-    if (!gameId) return;
+  onDragStart(source, piece) {
+    if (this.game.game_over()) return false;
+    
+    if (this.whiteSide !== 'human' && this.blackSide !== 'human') return false;
+    
+    if ((this.game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+        (this.game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+      return false;
+    }
+    
+    if (this.computerThinking) {
+      return false;
+    }
+    
+    return true;
+  }
 
-    resetTimers();
-
-    const response = await fetch(`/api/games/${gameId}/reset`, {
-      method: 'POST'
+  onDrop(source, target) {
+    const move = this.game.move({
+      from: source,
+      to: target,
+      promotion: 'q' 
     });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to reset game');
+    
+    if (move === null) return 'snapback';
+    
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({
+        type: 'make_move',
+        move: move.from + move.to + (move.promotion || '')
+      }));
     }
-
-    game = new Chess();
-    board.position('start');
-    board.orientation(getBoardOrientation())
-
-    gameOver = false;
-    gameOverNotification.classList.add('hidden');
-    computerThinkingIndicator.classList.add('hidden');
-
-    currentTurnDisplay.textContent = 'White';
-    moveCountDisplay.textContent = '0';
-
-    updateTimerDisplays();
-  } catch (error) {
-    console.error('Error resetting game:', error);
-    alert('Failed to reset game: ' + error.message);
-  }
-}
-
-function backToSetup() {
-  gameStarted = false;
-  gameOver = false;
-
-  stopClock();
-
-  if (socket) {
-    socket.close();
-    socket = null;
+    
+    this.updateStatus();
+    return true;
   }
 
-  setupCard.classList.remove('hidden');
-  gameOptionsCard.classList.add('hidden');
-  gameStatusCard.classList.add('hidden');
-  timerCard.classList.add('hidden');
-}
-
-function showComputerThinking(isThinking) {
-  computerThinking = isThinking;
-  if (isThinking) {
-    computerThinkingIndicator.classList.remove('hidden');
-  } else {
-    computerThinkingIndicator.classList.add('hidden');
-  }
-}
-
-function endGame(result) {
-  if (gameOver) return;
-
-  gameOver = true;
-
-  gameOverNotification.classList.remove('hidden');
-  gameOverResult.textContent = result === 'Draw' ? 'Draw!' : `${result} wins!`;
-}
-
-function tickClock() {
-  if (gameOver) {
-    stopClock();
-    return;
+  onSnapEnd() {
+    this.board.position(this.game.fen());
   }
 
-  if (game.turn() === 'w') {
-    whiteTimeRemaining--;
-    if (whiteTimeRemaining <= 0) {
-      whiteTimeRemaining = 0;
-      onTimeOut('White');
+  updateStatus() {
+    this.currentTurnDisplay.textContent = this.game.turn() === 'w' ? 'White' : 'Black';
+    
+    const whiteTimer = document.getElementById('white-timer');
+    const blackTimer = document.getElementById('black-timer');
+    
+    if (this.game.turn() === 'w') {
+      whiteTimer.classList.add('timer-active');
+      blackTimer.classList.remove('timer-active');
+    } else {
+      whiteTimer.classList.remove('timer-active');
+      blackTimer.classList.add('timer-active');
     }
-  } else {
-    blackTimeRemaining--;
-    if (blackTimeRemaining <= 0) {
-      blackTimeRemaining = 0;
-      onTimeOut('Black');
+    
+    if (this.game.in_checkmate()) {
+      const winner = this.game.turn() === 'w' ? 'Black' : 'White';
+      this.endGame(winner);
+    } else if (this.game.in_draw()) {
+      this.endGame('Draw');
     }
   }
-  updateTimerDisplays();
-}
 
-function onTimeOut(losingSide) {
-  stopClock();
-  gameOver = true;
-  if (losingSide === 'White') {
-    endGame('Black');
-  } else {
-    endGame('White');
+  connectWebSocket(id) {
+    this.socket = new WebSocket(`ws://${window.location.host}/ws/${id}`);
+    
+    this.socket.onopen = () => {
+      console.log('WebSocket connection established');
+    };
+    
+    this.socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      console.log('Received message:', message);
+      
+      if (message.type === 'board_update') {
+        this.game.load(message.fen);
+        this.board.position(message.fen);
+        this.board.orientation(this.getBoardOrientation());
+        this.updateMoveCountFromFEN(message.fen);
+        this.updateStatus();
+        
+        if (!message.is_game_over) {
+          this.startClock();
+        } else {
+          this.stopClock();
+        }
+        
+        if (message.hasOwnProperty('computer_thinking')) {
+          this.showComputerThinking(message.computer_thinking);
+        }
+        
+        if (message.is_game_over) {
+          let resultMessage = 'Game over: ';
+          if (message.result === 'checkmate') {
+            resultMessage += `${message.winner} wins by checkmate`;
+            this.endGame(message.winner);
+          } else if (message.result === 'stalemate' || 
+                     message.result === 'insufficient material' || 
+                     message.result === 'fifty-move rule' || 
+                     message.result === 'threefold repetition') {
+            resultMessage += `Draw by ${message.result}`;
+            this.endGame('Draw');
+          } else {
+            resultMessage += 'Draw';
+            this.endGame('Draw');
+          }
+        }
+      } else if (message.hasOwnProperty('computer_thinking')) {
+        this.showComputerThinking(message.computer_thinking);
+      }
+    };
+    
+    this.socket.onclose = () => {
+      console.log('WebSocket connection closed');
+    };
+    
+    this.socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
   }
-}
 
-function startClock() {
-  if (timerInterval) clearInterval(timerInterval);
-
-  timerInterval = setInterval(tickClock, 1000);
-}
-
-function stopClock() {
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
+  async startGame() {
+    try {
+      this.whiteSide = this.whiteSideSelect.value;
+      this.blackSide = this.blackSideSelect.value;
+      this.timeControl = parseInt(this.timeControlSelect.value, 10);
+      this.resetTimers();
+      
+      const response = await fetch('/api/new-game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          time_control: this.timeControl,
+          white_side: this.whiteSide,
+          black_side: this.blackSide
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create game');
+      }
+      
+      const data = await response.json();
+      this.gameId = data.game_id;
+      
+      this.setupCard.classList.add('hidden');
+      this.gameOptionsCard.classList.remove('hidden');
+      this.gameStatusCard.classList.remove('hidden');
+      this.timerCard.classList.remove('hidden');
+      this.gameOverNotification.classList.add('hidden');
+      this.computerThinkingIndicator.classList.add('hidden');
+      
+      this.gameStarted = true;
+      this.gameOver = false;
+      this.game = new Chess();
+      
+      this.initializeBoard();
+      this.connectWebSocket(this.gameId);
+      
+      const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network' };
+      this.gameModeDisplay.textContent = playerTypes[this.whiteSide] + ' vs ' + playerTypes[this.blackSide];
+      this.timeControlDisplay.textContent = this.timeControlSelect.options[this.timeControlSelect.selectedIndex].text;
+      this.currentTurnDisplay.textContent = 'White';
+      this.moveCountDisplay.textContent = '0';
+      
+      this.updatePlayerLabels();
+      this.updateTimerDisplays();
+      
+    } catch (error) {
+      console.error('Error starting game:', error);
+      alert('Failed to start game');
+    }
   }
-}
 
-function resetTimers() {
-  stopClock();
-  whiteTimeRemaining = timeControl;
-  blackTimeRemaining = timeControl;
-  updateTimerDisplays();
-}
-
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
-
-function updateTimerDisplays() {
-  const white = whiteTimeRemaining != null ? whiteTimeRemaining : timeControl;
-  const black = blackTimeRemaining != null ? blackTimeRemaining : timeControl;
-  whiteTimeDisplay.textContent = formatTime(white);
-  blackTimeDisplay.textContent = formatTime(black);
-}
-
-function updatePlayerLabels() {
-  const map = {
-    human: 'Human',
-    algo: 'Computer (Algo)',
-    nn: 'Computer (NN)'
-  };
-  whitePlayerLabel.textContent = `White (${map[whiteSide]})`;
-  blackPlayerLabel.textContent = `Black (${map[blackSide]})`;
-}
-
-function getBoardOrientation() {
-  if (whiteSide !== 'human' && blackSide === 'human') {
-    return 'black';
+  async resetGame() {
+    try {
+      if (!this.gameId) return;
+      
+      this.resetTimers();
+      
+      const response = await fetch(`/api/games/${this.gameId}/reset`, {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to reset game');
+      }
+      
+      this.game = new Chess();
+      this.board.position('start');
+      this.board.orientation(this.getBoardOrientation());
+      
+      this.gameOver = false;
+      this.gameOverNotification.classList.add('hidden');
+      this.computerThinkingIndicator.classList.add('hidden');
+      
+      this.currentTurnDisplay.textContent = 'White';
+      this.moveCountDisplay.textContent = '0';
+      
+      this.updateTimerDisplays();
+      
+    } catch (error) {
+      console.error('Error resetting game:', error);
+      alert('Failed to reset game: ' + error.message);
+    }
   }
-  return 'white';
-}
 
-function updateMoveCountFromFEN(fen) {
-  const parts = fen.split(' ');
-  if (parts.length >= 6) {
-    const fullMoveNumber = parseInt(parts[5]);
-    moveCountDisplay.textContent = fullMoveNumber - 1;
+  backToSetup() {
+    this.gameStarted = false;
+    this.gameOver = false;
+    
+    this.stopClock();
+    
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
+    
+    this.setupCard.classList.remove('hidden');
+    this.gameOptionsCard.classList.add('hidden');
+    this.gameStatusCard.classList.add('hidden');
+    this.timerCard.classList.add('hidden');
+  }
+
+  showComputerThinking(isThinking) {
+    this.computerThinking = isThinking;
+    if (isThinking) {
+      this.computerThinkingIndicator.classList.remove('hidden');
+    } else {
+      this.computerThinkingIndicator.classList.add('hidden');
+    }
+  }
+
+  endGame(result) {
+    if (this.gameOver) return;
+    
+    this.gameOver = true;
+    this.gameOverNotification.classList.remove('hidden');
+    this.gameOverResult.textContent = result === 'Draw' ? 'Draw!' : `${result} wins!`;
+    this.stopClock();
+  }
+
+  tickClock() {
+    if (this.gameOver) {
+      this.stopClock();
+      return;
+    }
+    
+    if (this.game.turn() === 'w') {
+      this.whiteTimeRemaining--;
+      if (this.whiteTimeRemaining <= 0) {
+        this.whiteTimeRemaining = 0;
+        this.onTimeOut('White');
+      }
+    } else {
+      this.blackTimeRemaining--;
+      if (this.blackTimeRemaining <= 0) {
+        this.blackTimeRemaining = 0;
+        this.onTimeOut('Black');
+      }
+    }
+    
+    this.updateTimerDisplays();
+  }
+
+  onTimeOut(losingSide) {
+    this.stopClock();
+    this.gameOver = true;
+    if (losingSide === 'White') {
+      this.endGame('Black');
+    } else {
+      this.endGame('White');
+    }
+  }
+
+  startClock() {
+    if (this.timerInterval) clearInterval(this.timerInterval);
+    this.timerInterval = setInterval(() => this.tickClock(), 1000);
+  }
+
+  stopClock() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+  }
+
+  resetTimers() {
+    this.stopClock();
+    this.whiteTimeRemaining = this.timeControl;
+    this.blackTimeRemaining = this.timeControl;
+    this.updateTimerDisplays();
+  }
+
+  formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  updateTimerDisplays() {
+    const white = this.whiteTimeRemaining != null ? this.whiteTimeRemaining : this.timeControl;
+    const black = this.blackTimeRemaining != null ? this.blackTimeRemaining : this.timeControl;
+    this.whiteTimeDisplay.textContent = this.formatTime(white);
+    this.blackTimeDisplay.textContent = this.formatTime(black);
+  }
+
+  updatePlayerLabels() {
+    const playerTypes = {
+      'human': 'Human',
+      'nn_policy': 'Neural Network'
+    };
+    
+    this.whitePlayerLabel.textContent = `White (${playerTypes[this.whiteSide]})`;
+    this.blackPlayerLabel.textContent = `Black (${playerTypes[this.blackSide]})`;
+  }
+
+  getBoardOrientation() {
+    if (this.whiteSide !== 'human' && this.blackSide === 'human') {
+      return 'black';
+    }
+    return 'white';
+  }
+
+  updateMoveCountFromFEN(fen) {
+    const parts = fen.split(' ');
+    if (parts.length >= 6) {
+      const fullMoveNumber = parseInt(parts[5]);
+      this.moveCountDisplay.textContent = fullMoveNumber - 1;
+    }
   }
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  timeControl = parseInt(timeControlSelect.value, 10);
-
-  updatePlayerLabels();
-  updateTimerDisplays();
-
-  whiteSideSelect.addEventListener('change', () => {
-    whiteSide = whiteSideSelect.value;
-    updatePlayerLabels();
-  })
-  blackSideSelect.addEventListener('change', () => {
-    blackSide = blackSideSelect.value;
-    updatePlayerLabels();
-  })
-
-  timeControlSelect.addEventListener('change', () => {
-    timeControl = parseInt(timeControlSelect.value, 10);
-    updateTimerDisplays();
-  });
-
-  startGameBtn.addEventListener('click', startGame);
-  newGameBtn.addEventListener('click', startGame);
-  playAgainBtn.addEventListener('click', resetGame);
-  backToSetupBtn.addEventListener('click', backToSetup);
+  window.chessGame = new ChessGame();
 });

@@ -6,14 +6,93 @@ import time
 import random
 import sys
 import os
+import math
+
+
+class MCTSNode:
+    def __init__(self, board, parent=None, move=None, prior=0.0):
+        self.board = board.copy()
+        self.parent = parent
+        self.move = move
+        self.children = {}
+
+        self.visits = 0
+        self.value_sum = 0.0
+        self.prior = prior
+
+        self._is_terminal = None
+        self._terminal_value = None
+
+    def expand(self, policy_fn):
+        probs = policy_fn(self.board)
+
+        for move, prob in probs.items():
+            if move not in self.children:
+                new_board = self.board.copy()
+                new_board.push(move)
+                self.children[move] = MCTSNode(
+                    new_board, parent=self, move=move, prior=prob
+                )
+
+    def select_child(self, c_puct=1.5):
+        best_score = float("-inf")
+        best_move = None
+        best_child = None
+
+        for move, child in self.children.items():
+            exploitation = 0
+            if child.visits > 0:
+                exploitation = child.value_sum / child.visits
+
+            exploration = (
+                c_puct * child.prior * math.sqrt(self.visits) / (1 + child.visits)
+            )
+
+            ucb_score = exploitation + exploration
+
+            if ucb_score > best_score:
+                best_score = ucb_score
+                best_move = move
+                best_child = child
+
+        return best_child, best_move
+
+    def is_terminal(self):
+        if self._is_terminal is None:
+            self._is_terminal = self.board.is_game_over()
+        return self._is_terminal
+
+    def terminal_value(self, perspective):
+        if self._terminal_value is None:
+            if self.board.is_checkmate():
+                self._terminal_value = -1.0
+            else:
+                self._terminal_value = 0.0
+
+        to_move = self.board.turn
+        if perspective != to_move:
+            return -self._terminal_value
+        return self._terminal_value
+
+    def backpropagate(self, value):
+        node = self
+        while node is not None:
+            node.visits += 1
+            node.value_sum += value
+            value = -value
+            node = node.parent
 
 
 class ChessAI:
     MAX_MOVE_ID = 63 * (64 * 5) + 63 * 5 + 4
     N_PLANES = 13
-    
-    def __init__(self, policy_model_path="policy_models/policy_model.onnx", 
-                opening_book_path="baron30.bin", temperature=0.3):
+
+    def __init__(
+        self,
+        policy_model_path="policy_models/policy_model.onnx",
+        opening_book_path="baron30.bin",
+        temperature=0.3,
+    ):
         self.board = chess.Board()
         self.policy_model_path = policy_model_path
         self.opening_book_path = opening_book_path
@@ -21,14 +100,16 @@ class ChessAI:
         self.nodes_searched = 0
         self.current_best_move = None
         self.policy_cache = {}
-        
+        self.mcts_cache = {}
+
         try:
-            if not os.path.exists(self.policy_model_path):
-                raise FileNotFoundError(f"Policy model not found at '{self.policy_model_path}'")
-                
+            if not os.path.exists(policy_model_path):
+                raise FileNotFoundError(
+                    f"Policy model not found at '{policy_model_path}'"
+                )
+
             self.policy_session = ort.InferenceSession(
-                self.policy_model_path, 
-                providers=['CPUExecutionProvider']
+                policy_model_path, providers=["CPUExecutionProvider"]
             )
             self.policy_input_name = self.policy_session.get_inputs()[0].name
         except Exception as e:
@@ -38,11 +119,13 @@ class ChessAI:
     def reset_board(self):
         self.board.reset()
         self.policy_cache.clear()
+        self.mcts_cache.clear()
 
     def set_board_from_fen(self, fen):
         try:
             self.board.set_fen(fen)
             self.policy_cache.clear()
+            self.mcts_cache.clear()
         except ValueError:
             print(f"Invalid FEN string: {fen}", file=sys.stderr)
             self.board.reset()
@@ -59,6 +142,7 @@ class ChessAI:
             if move in self.board.legal_moves:
                 self.board.push(move)
                 self.policy_cache.clear()
+                self.mcts_cache.clear()
                 return True
             return False
         except Exception:
@@ -71,8 +155,12 @@ class ChessAI:
     def _board_to_planes(self, board):
         planes = np.zeros((8, 8, self.N_PLANES), dtype=np.float32)
         piece_to_plane_idx = {
-            chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 2,
-            chess.ROOK: 3, chess.QUEEN: 4, chess.KING: 5
+            chess.PAWN: 0,
+            chess.KNIGHT: 1,
+            chess.BISHOP: 2,
+            chess.ROOK: 3,
+            chess.QUEEN: 4,
+            chess.KING: 5,
         }
         for square in chess.SQUARES:
             piece = board.piece_at(square)
@@ -83,7 +171,7 @@ class ChessAI:
                 color_offset = 0 if piece.color == chess.WHITE else 6
                 plane_idx = plane_base_idx + color_offset
                 planes[7 - rank, file, plane_idx] = 1.0
-                
+
         if board.turn == chess.BLACK:
             planes[:, :, self.N_PLANES - 1] = 1.0
         return planes
@@ -93,25 +181,15 @@ class ChessAI:
         to_square = move.to_square
         promotion_type = 0
         if move.promotion is not None:
-            promotion_map = {chess.QUEEN: 1, chess.ROOK: 2, chess.BISHOP: 3, chess.KNIGHT: 4}
+            promotion_map = {
+                chess.QUEEN: 1,
+                chess.ROOK: 2,
+                chess.BISHOP: 3,
+                chess.KNIGHT: 4,
+            }
             promotion_type = promotion_map.get(move.promotion, 0)
         move_index = from_square * (64 * 5) + to_square * 5 + promotion_type
         return min(move_index, self.MAX_MOVE_ID)
-
-    def _decode_move(self, index):
-        if not (0 <= index <= self.MAX_MOVE_ID): 
-            return None
-        promotion_type = index % 5
-        to_square = (index // 5) % 64
-        from_square = index // (64 * 5)
-        promotion = None
-        if promotion_type > 0:
-            promotion_map_rev = {1: chess.QUEEN, 2: chess.ROOK, 3: chess.BISHOP, 4: chess.KNIGHT}
-            promotion = promotion_map_rev.get(promotion_type)
-        try: 
-            return chess.Move(from_square, to_square, promotion)
-        except ValueError: 
-            return None
 
     def get_policy_probabilities(self, board):
         board_fen = board.fen()
@@ -122,19 +200,21 @@ class ChessAI:
         batch = np.expand_dims(board_planes, axis=0).astype(np.float32)
 
         try:
-            policy_logits_all_moves = self.policy_session.run(None, {self.policy_input_name: batch})[0][0]
+            policy_logits = self.policy_session.run(
+                None, {self.policy_input_name: batch}
+            )[0][0]
         except Exception as e:
-            print(f"Error during policy network inference: {e}", file=sys.stderr)
+            print(f"Error during policy inference: {e}", file=sys.stderr)
             return {}
 
         move_probabilities = {}
         legal_moves = list(board.legal_moves)
         sum_legal_probs = 0.0
-        
+
         for move in legal_moves:
             encoded_move_idx = self._encode_move(move)
-            if 0 <= encoded_move_idx < len(policy_logits_all_moves):
-                prob = float(policy_logits_all_moves[encoded_move_idx])
+            if 0 <= encoded_move_idx < len(policy_logits):
+                prob = float(policy_logits[encoded_move_idx])
                 move_probabilities[move] = prob
                 sum_legal_probs += prob
             else:
@@ -151,6 +231,130 @@ class ChessAI:
         self.policy_cache[board_fen] = move_probabilities
         return move_probabilities
 
+    def mcts_search(
+        self, root_board, num_simulations=800, exploration=1.5, time_limit=3.0
+    ):
+        root = MCTSNode(root_board)
+        self.nodes_searched = 0
+
+        def policy_fn(board):
+            return self.get_policy_probabilities(board)
+
+        root.expand(policy_fn)
+
+        start_time = time.time()
+        simulation = 0
+
+        while time.time() - start_time < time_limit and simulation < num_simulations:
+            node = root
+            search_path = [node]
+
+            while node.children and not node.is_terminal():
+                child, move = node.select_child(exploration)
+                if child is None:
+                    break
+
+                node = child
+                search_path.append(node)
+
+            if not node.is_terminal() and not node.children:
+                node.expand(policy_fn)
+
+            value = 0
+            if node.is_terminal():
+                value = node.terminal_value(root_board.turn)
+            else:
+                child_priors = []
+                child_values = []
+
+                for child_move, child_node in node.children.items():
+                    child_priors.append(child_node.prior)
+
+                if sum(child_priors) > 0:
+                    norm_priors = [p / sum(child_priors) for p in child_priors]
+                    value = -0.1
+
+            for bnode in reversed(search_path):
+                bnode.backpropagate(value)
+                value = -value
+
+            simulation += 1
+            self.nodes_searched += 1
+
+        best_move = None
+        best_visits = -1
+
+        for move, child in root.children.items():
+            if child.visits > best_visits:
+                best_visits = child.visits
+                best_move = move
+
+        move_stats = sorted(
+            [
+                (move, child.visits, child.value_sum / max(1, child.visits))
+                for move, child in root.children.items()
+            ],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+
+        for i, (move, visits, value) in enumerate(move_stats[:5]):
+            cp_score = int(value * 100)  # Convert to centipawns
+            print(
+                f"info string {i + 1}. {move.uci()} visits: {visits} score: {cp_score}"
+            )
+
+        elapsed = time.time() - start_time
+        print(f"info string MCTS completed {simulation} simulations in {elapsed:.2f}s")
+
+        return best_move, root
+
+    def get_best_move_iterative_deepening(
+        self, max_depth=1, time_limit=3.0, external_stop_callback=None
+    ):
+        start_time = time.time()
+
+        # book_move = self.get_book_move()
+        # if book_move:
+        #     self.current_best_move = book_move
+        #     print(f"info string book move {book_move.uci()}")
+        #     return book_move
+
+        if self.board.is_game_over():
+            return None
+
+        simulation_count = min(800, int(time_limit * 300))
+
+        best_move, root = self.mcts_search(
+            self.board, num_simulations=simulation_count, time_limit=time_limit * 0.95
+        )
+
+        if not best_move:
+            move_probs = self.get_policy_probabilities(self.board)
+            moves = list(move_probs.keys())
+            if moves:
+                best_move = max(moves, key=lambda m: move_probs[m])
+            else:
+                best_move = self.get_random_move()
+
+        elapsed = time.time() - start_time
+        best_child = root.children.get(best_move)
+        if best_child:
+            score = int(100 * best_child.value_sum / max(1, best_child.visits))
+            visits = best_child.visits
+        else:
+            score = 0
+            visits = 0
+
+        effective_depth = 1 + int(math.log2(max(1, self.nodes_searched)) / 2)
+
+        print(
+            f"info depth {effective_depth} score cp {score} nodes {self.nodes_searched} time {int(elapsed * 1000)} pv {best_move.uci()}"
+        )
+
+        self.current_best_move = best_move
+        return best_move
+
     def get_book_move(self):
         if not self.opening_book_path or not os.path.exists(self.opening_book_path):
             return None
@@ -158,50 +362,14 @@ class ChessAI:
             with chess.polyglot.open_reader(self.opening_book_path) as reader:
                 entries = list(reader.find_all(self.board))
                 if entries:
-                    return random.choices([e.move for e in entries], weights=[e.weight for e in entries], k=1)[0]
+                    return random.choices(
+                        [e.move for e in entries],
+                        weights=[e.weight for e in entries],
+                        k=1,
+                    )[0]
             return None
         except Exception:
             return None
-
-    def get_best_move_iterative_deepening(self, max_depth=1, time_limit=1.0, external_stop_callback=None):
-        self.nodes_searched = 0
-        start_time = time.time()
-
-        if self.board.is_game_over():
-            return None
-
-        move_probs = self.get_policy_probabilities(self.board)
-        self.nodes_searched = len(move_probs)
-
-        if not move_probs:
-            self.current_best_move = self.get_random_move()
-            return self.current_best_move
-
-        moves = list(move_probs.keys())
-        raw_probabilities = np.array([move_probs[m] for m in moves], dtype=np.float64)
-
-        if self.temperature == 0:
-            best_move_idx = np.argmax(raw_probabilities)
-            selected_move = moves[best_move_idx]
-        else:
-            try:
-                probs_temp_scaled = np.power(raw_probabilities + 1e-9, 1.0 / self.temperature)
-                probs_temp_scaled /= np.sum(probs_temp_scaled)
-                selected_move = np.random.choice(moves, p=probs_temp_scaled)
-            except ValueError:
-                best_move_idx = np.argmax(raw_probabilities)
-                selected_move = moves[best_move_idx]
-
-        self.current_best_move = selected_move
-
-        elapsed = time.time() - start_time
-        nps = int(self.nodes_searched / elapsed) if elapsed > 0 else 0
-        score_for_uci = int(move_probs.get(selected_move, 0) * 1000)
-        pv_str = selected_move.uci()
-        
-        print(f"info depth 1 score cp {score_for_uci} nodes {self.nodes_searched} nps {nps} time {int(elapsed * 1000)} pv {pv_str}")
-
-        return selected_move
 
     def get_current_best_move(self):
         return self.current_best_move

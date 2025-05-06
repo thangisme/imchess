@@ -20,11 +20,13 @@ class MCTSNode:
         self.value_sum = 0.0
         self.prior = prior
 
+        self.nn_value = None
+
         self._is_terminal = None
         self._terminal_value = None
 
-    def expand(self, policy_fn):
-        probs = policy_fn(self.board)
+    def expand(self, policy_value_fn):
+        probs, self.nn_value = policy_value_fn(self.board)
 
         for move, prob in probs.items():
             if move not in self.children:
@@ -89,7 +91,7 @@ class ChessAI:
 
     def __init__(
         self,
-        policy_model_path="policy_models/policy_model.onnx",
+        policy_model_path="policy_models/policy_value_model.onnx",
         opening_book_path="baron30.bin",
         temperature=0.3,
     ):
@@ -99,7 +101,7 @@ class ChessAI:
         self.temperature = temperature
         self.nodes_searched = 0
         self.current_best_move = None
-        self.policy_cache = {}
+        self.policy_value_cache = {}
         self.mcts_cache = {}
 
         try:
@@ -108,23 +110,29 @@ class ChessAI:
                     f"Policy model not found at '{policy_model_path}'"
                 )
 
-            self.policy_session = ort.InferenceSession(
+            self.policy_value_session = ort.InferenceSession(
                 policy_model_path, providers=["CPUExecutionProvider"]
             )
-            self.policy_input_name = self.policy_session.get_inputs()[0].name
+            self.policy_input_name = self.policy_value_session.get_inputs()[0].name
+
+            print(f"ONNX model loaded. Input name: {self.policy_input_name}")
+            print(
+                f"Model outputs: {[o.name for o in self.policy_value_session.get_outputs()]}"
+            )
+
         except Exception as e:
-            print(f"Failed to load ONNX Policy Network: {e}", file=sys.stderr)
+            print(f"Failed to load ONNX Policy-Value Network: {e}", file=sys.stderr)
             raise
 
     def reset_board(self):
         self.board.reset()
-        self.policy_cache.clear()
+        self.policy_value_cache.clear()
         self.mcts_cache.clear()
 
     def set_board_from_fen(self, fen):
         try:
             self.board.set_fen(fen)
-            self.policy_cache.clear()
+            self.policy_value_cache.clear()
             self.mcts_cache.clear()
         except ValueError:
             print(f"Invalid FEN string: {fen}", file=sys.stderr)
@@ -141,7 +149,7 @@ class ChessAI:
 
             if move in self.board.legal_moves:
                 self.board.push(move)
-                self.policy_cache.clear()
+                self.policy_value_cache.clear()
                 self.mcts_cache.clear()
                 return True
             return False
@@ -191,22 +199,29 @@ class ChessAI:
         move_index = from_square * (64 * 5) + to_square * 5 + promotion_type
         return min(move_index, self.MAX_MOVE_ID)
 
-    def get_policy_probabilities(self, board):
+    def get_policy_and_value(self, board):
         board_fen = board.fen()
-        if board_fen in self.policy_cache:
-            return self.policy_cache[board_fen]
+        if board_fen in self.policy_value_cache:
+            return self.policy_value_cache[board_fen]
 
         board_planes = self._board_to_planes(board)
         batch = np.expand_dims(board_planes, axis=0).astype(np.float32)
 
         try:
-            policy_logits = self.policy_session.run(
-                None, {self.policy_input_name: batch}
-            )[0][0]
-        except Exception as e:
-            print(f"Error during policy inference: {e}", file=sys.stderr)
-            return {}
+            # Explicitly request outputs by name instead of using None
+            outputs = self.policy_value_session.run(
+                ["policy_head", "value_head"], {self.policy_input_name: batch}
+            )
 
+            # Now we get both outputs properly
+            policy_logits = outputs[0][0]  # Policy head
+            value = float(outputs[1][0])  # Value head
+
+        except Exception as e:
+            print(f"Error during policy-value inference: {e}", file=sys.stderr)
+            return {}, 0.0
+
+        # Rest of function unchanged
         move_probabilities = {}
         legal_moves = list(board.legal_moves)
         sum_legal_probs = 0.0
@@ -228,8 +243,8 @@ class ChessAI:
             for move in legal_moves:
                 move_probabilities[move] = prob_per_move
 
-        self.policy_cache[board_fen] = move_probabilities
-        return move_probabilities
+        self.policy_value_cache[board_fen] = (move_probabilities, value)
+        return move_probabilities, value
 
     def mcts_search(
         self, root_board, num_simulations=800, exploration=1.5, time_limit=3.0
@@ -237,10 +252,10 @@ class ChessAI:
         root = MCTSNode(root_board)
         self.nodes_searched = 0
 
-        def policy_fn(board):
-            return self.get_policy_probabilities(board)
+        def policy_value_fn(board):
+            return self.get_policy_and_value(board)
 
-        root.expand(policy_fn)
+        root.expand(policy_value_fn)
 
         start_time = time.time()
         simulation = 0
@@ -258,21 +273,15 @@ class ChessAI:
                 search_path.append(node)
 
             if not node.is_terminal() and not node.children:
-                node.expand(policy_fn)
+                node.expand(policy_value_fn)
 
             value = 0
             if node.is_terminal():
                 value = node.terminal_value(root_board.turn)
             else:
-                child_priors = []
-                child_values = []
-
-                for child_move, child_node in node.children.items():
-                    child_priors.append(child_node.prior)
-
-                if sum(child_priors) > 0:
-                    norm_priors = [p / sum(child_priors) for p in child_priors]
-                    value = -0.1
+                value = node.nn_value
+                if node.board.turn != root_board.turn:
+                    value = -value
 
             for bnode in reversed(search_path):
                 bnode.backpropagate(value)
@@ -299,7 +308,7 @@ class ChessAI:
         )
 
         for i, (move, visits, value) in enumerate(move_stats[:5]):
-            cp_score = int(value * 100)  # Convert to centipawns
+            cp_score = int(value * 100)
             print(
                 f"info string {i + 1}. {move.uci()} visits: {visits} score: {cp_score}"
             )
@@ -330,7 +339,7 @@ class ChessAI:
         )
 
         if not best_move:
-            move_probs = self.get_policy_probabilities(self.board)
+            move_probs, value = self.get_policy_and_value(self.board)
             moves = list(move_probs.keys())
             if moves:
                 best_move = max(moves, key=lambda m: move_probs[m])

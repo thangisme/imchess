@@ -20,7 +20,7 @@ except ImportError as e:
     print(f"Error: Could not import PolicyChessAI: {e}", file=sys.stderr)
     print("Neural Network mode will not be available.", file=sys.stderr)
 
-POLICY_MODEL_PATH = "policy_models/policy_model.onnx"
+POLICY_MODEL_PATH = "policy_models/policy_value_model.onnx"
 OPENING_BOOK_PATH = "baron30.bin"
 DEFAULT_POLICY_TEMPERATURE = 0.2
 DEFAULT_SEARCH_TIME_LIMIT = 5.0

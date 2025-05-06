@@ -103,7 +103,7 @@ def board_to_planes(board: chess.Board) -> np.ndarray:
     return planes
 
 
-def process_pgn_stream(pgn_stream, positions, target_moves):
+def process_pgn_stream(pgn_stream, positions, target_moves, target_values):
     games_processed_in_stream = 0
     global game_count
 
@@ -131,6 +131,14 @@ def process_pgn_stream(pgn_stream, positions, target_moves):
         except ValueError:
             continue
 
+        # Extract game result
+        result = game.headers.get("Result", "*")
+        result_value = 0.0  # Default for draw or unknown
+        if result == "1-0":
+            result_value = 1.0
+        elif result == "0-1":
+            result_value = -1.0
+
         board = game.board()
         try:
             for move in game.mainline_moves():
@@ -144,8 +152,14 @@ def process_pgn_stream(pgn_stream, positions, target_moves):
                     board_state_planes = board_to_planes(board)
                     encoded_move = encode_move(move)
 
+                    # Store position value from current player's perspective
+                    position_value = (
+                        result_value if board.turn == chess.WHITE else -result_value
+                    )
+
                     positions.append(board_state_planes)
                     target_moves.append(encoded_move)
+                    target_values.append(position_value)
 
                 board.push(move)
 
@@ -170,6 +184,7 @@ def run_data_preparation():
 
     all_positions = []
     all_target_moves = []
+    all_target_values = []
     global game_count
     game_count = 0
 
@@ -187,7 +202,9 @@ def run_data_preparation():
                     text_stream = io.TextIOWrapper(
                         binary_reader, encoding="utf-8", errors="ignore"
                     )
-                    process_pgn_stream(text_stream, all_positions, all_target_moves)
+                    process_pgn_stream(
+                        text_stream, all_positions, all_target_moves, all_target_values
+                    )
 
         except ImportError:
             print(
@@ -209,14 +226,16 @@ def run_data_preparation():
             with open(
                 PGN_FILE, "r", encoding="utf-8", errors="ignore"
             ) as pgn_file_handle:
-                process_pgn_stream(pgn_file_handle, all_positions, all_target_moves)
+                process_pgn_stream(
+                    pgn_file_handle, all_positions, all_target_moves, all_target_values
+                )
         except Exception as e:
             print(f"\nERROR processing PGN file: {e}", file=sys.stderr)
             sys.exit(1)
 
     total_datapoints = len(all_positions)
     print(f"\nFinished reading PGNs. Processed {game_count} games.")
-    print(f"Extracted {total_datapoints} (position, move) pairs.")
+    print(f"Extracted {total_datapoints} (position, move, value) triplets.")
 
     if total_datapoints == 0:
         print(
@@ -226,13 +245,17 @@ def run_data_preparation():
 
     print("Converting data to NumPy arrays...")
     X = np.array(all_positions, dtype=np.float32)
-    y = np.array(all_target_moves, dtype=np.int32)
-    print(f"X shape: {X.shape}, y shape: {y.shape}")
+    y_policy = np.array(all_target_moves, dtype=np.int32)
+    y_value = np.array(all_target_values, dtype=np.float32)
+    print(
+        f"X shape: {X.shape}, y_policy shape: {y_policy.shape}, y_value shape: {y_value.shape}"
+    )
 
     print("Shuffling data...")
     indices = np.random.permutation(total_datapoints)
     X = X[indices]
-    y = y[indices]
+    y_policy = y_policy[indices]
+    y_value = y_value[indices]
 
     val_size = int(VALIDATION_SPLIT * total_datapoints)
     train_size = total_datapoints - val_size
@@ -246,14 +269,17 @@ def run_data_preparation():
 
     print(f"Splitting into {train_size} training and {val_size} validation samples.")
     X_train, X_val = X[:train_size], X[train_size:]
-    y_train, y_val = y[:train_size], y[train_size:]
+    y_policy_train, y_policy_val = y_policy[:train_size], y_policy[train_size:]
+    y_value_train, y_value_val = y_value[:train_size], y_value[train_size:]
 
     print("Saving processed data to .npy files...")
     try:
         np.save(os.path.join(OUTPUT_DIR, "X_train.npy"), X_train)
-        np.save(os.path.join(OUTPUT_DIR, "y_train.npy"), y_train)
+        np.save(os.path.join(OUTPUT_DIR, "y_policy_train.npy"), y_policy_train)
+        np.save(os.path.join(OUTPUT_DIR, "y_value_train.npy"), y_value_train)
         np.save(os.path.join(OUTPUT_DIR, "X_val.npy"), X_val)
-        np.save(os.path.join(OUTPUT_DIR, "y_val.npy"), y_val)
+        np.save(os.path.join(OUTPUT_DIR, "y_policy_val.npy"), y_policy_val)
+        np.save(os.path.join(OUTPUT_DIR, "y_value_val.npy"), y_value_val)
         print(f"Data successfully saved to {OUTPUT_DIR}")
     except Exception as e:
         print(f"ERROR: Failed to save NumPy arrays: {e}", file=sys.stderr)

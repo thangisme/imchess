@@ -46,9 +46,9 @@ LR_REDUCE_PATIENCE = 3
 LR_REDUCE_FACTOR = 0.2
 MIN_LR = 1e-7
 
-BEST_MODEL_FILENAME = os.path.join(MODEL_OUTPUT_DIR, "best_policy_model.keras")
-FINAL_MODEL_FILENAME = os.path.join(MODEL_OUTPUT_DIR, "final_policy_model.keras")
-ONNX_MODEL_FILENAME = os.path.join(MODEL_OUTPUT_DIR, "policy_model.onnx")
+BEST_MODEL_FILENAME = os.path.join(MODEL_OUTPUT_DIR, "best_policy_value_model.keras")
+FINAL_MODEL_FILENAME = os.path.join(MODEL_OUTPUT_DIR, "final_policy_value_model.keras")
+ONNX_MODEL_FILENAME = os.path.join(MODEL_OUTPUT_DIR, "policy_value_model.onnx")
 HISTORY_PLOT_FILENAME = os.path.join(MODEL_OUTPUT_DIR, "training_history.png")
 TENSORBOARD_LOG_DIR = os.path.join(MODEL_OUTPUT_DIR, "logs")
 
@@ -56,7 +56,7 @@ os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 os.makedirs(TENSORBOARD_LOG_DIR, exist_ok=True)
 
 
-def build_policy_network(
+def build_policy_value_network(
     input_shape=INPUT_SHAPE,
     num_filters=NUM_FILTERS,
     dense_units_1=DENSE_UNITS_1,
@@ -82,17 +82,25 @@ def build_policy_network(
     x = layers.Dropout(dropout_rate, name="dropout_1")(x)
     x = layers.Dense(dense_units_2, activation="relu", name="dense_2")(x)
 
-    outputs = layers.Dense(
+    # Policy head (existing)
+    policy_head = layers.Dense(
         num_policy_outputs, activation="softmax", name="policy_head"
     )(x)
 
-    model = keras.Model(inputs=inputs, outputs=outputs, name="ChessPolicyNetwork")
+    # Value head (new)
+    value_hidden = layers.Dense(256, activation="relu", name="value_hidden")(x)
+    value_head = layers.Dense(1, activation="tanh", name="value_head")(value_hidden)
+
+    model = keras.Model(
+        inputs=inputs, outputs=[policy_head, value_head], name="ChessPolicyValueNetwork"
+    )
     return model
 
 
-def data_generator(x_path, y_path, indices, batch_size):
+def data_generator(x_path, y_policy_path, y_value_path, indices, batch_size):
     x_mmap = np.load(x_path, mmap_mode="r")
-    y_mmap = np.load(y_path, mmap_mode="r")
+    y_policy_mmap = np.load(y_policy_path, mmap_mode="r")
+    y_value_mmap = np.load(y_value_path, mmap_mode="r")
 
     num_samples = len(indices)
     num_batches = num_samples // batch_size
@@ -106,9 +114,14 @@ def data_generator(x_path, y_path, indices, batch_size):
 
             try:
                 batch_x = np.array(x_mmap[batch_indices], dtype=np.float32)
-                batch_y = np.array(y_mmap[batch_indices], dtype=np.int32)
+                batch_y_policy = np.array(y_policy_mmap[batch_indices], dtype=np.int32)
+                batch_y_value = np.array(y_value_mmap[batch_indices], dtype=np.float32)
 
-                yield batch_x, batch_y
+                # Return dictionary of outputs for multi-output model
+                yield (
+                    batch_x,
+                    {"policy_head": batch_y_policy, "value_head": batch_y_value},
+                )
 
             except IndexError as e:
                 print(
@@ -127,11 +140,20 @@ def train_model():
     print("Setting up data generators...")
     try:
         X_train_path = os.path.join(DATA_DIR, "X_train.npy")
-        y_train_path = os.path.join(DATA_DIR, "y_train.npy")
+        y_policy_train_path = os.path.join(DATA_DIR, "y_policy_train.npy")
+        y_value_train_path = os.path.join(DATA_DIR, "y_value_train.npy")
         X_val_path = os.path.join(DATA_DIR, "X_val.npy")
-        y_val_path = os.path.join(DATA_DIR, "y_val.npy")
+        y_policy_val_path = os.path.join(DATA_DIR, "y_policy_val.npy")
+        y_value_val_path = os.path.join(DATA_DIR, "y_value_val.npy")
 
-        required_files = [X_train_path, y_train_path, X_val_path, y_val_path]
+        required_files = [
+            X_train_path,
+            y_policy_train_path,
+            y_value_train_path,
+            X_val_path,
+            y_policy_val_path,
+            y_value_val_path,
+        ]
         for p in required_files:
             if not os.path.exists(p):
                 print(f"ERROR: Data file not found: {p}", file=sys.stderr)
@@ -178,21 +200,28 @@ def train_model():
                 shape=(None, INPUT_SHAPE[0], INPUT_SHAPE[1], INPUT_SHAPE[2]),
                 dtype=tf.float32,
             ),
-            tf.TensorSpec(
-                shape=(None,), dtype=tf.int32
-            ),  # Shape is (None,) for sparse labels
+            {
+                "policy_head": tf.TensorSpec(shape=(None,), dtype=tf.int32),
+                "value_head": tf.TensorSpec(shape=(None,), dtype=tf.float32),
+            },
         )
 
         print("Creating tf.data.Dataset from generators...")
         train_dataset = tf.data.Dataset.from_generator(
             lambda: data_generator(
-                X_train_path, y_train_path, train_indices, BATCH_SIZE
+                X_train_path,
+                y_policy_train_path,
+                y_value_train_path,
+                train_indices,
+                BATCH_SIZE,
             ),
             output_signature=output_signature,
         )
 
         val_dataset = tf.data.Dataset.from_generator(
-            lambda: data_generator(X_val_path, y_val_path, val_indices, BATCH_SIZE),
+            lambda: data_generator(
+                X_val_path, y_policy_val_path, y_value_val_path, val_indices, BATCH_SIZE
+            ),
             output_signature=output_signature,
         )
 
@@ -218,8 +247,8 @@ def train_model():
         print(f"ERROR setting up data generators or datasets: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("Building the policy network model...")
-    model = build_policy_network()
+    print("Building the policy-value network model...")
+    model = build_policy_value_network()
     model.summary()
 
     print("Compiling the model...")
@@ -228,12 +257,18 @@ def train_model():
     )
     model.compile(
         optimizer=optimizer,
-        loss=keras.losses.SparseCategoricalCrossentropy(),
-        metrics=[
-            keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
-            keras.metrics.SparseTopKCategoricalAccuracy(k=3, name="top3_accuracy"),
-            keras.metrics.SparseTopKCategoricalAccuracy(k=5, name="top5_accuracy"),
-        ],
+        loss={
+            "policy_head": keras.losses.SparseCategoricalCrossentropy(),
+            "value_head": keras.losses.MeanSquaredError(),
+        },
+        metrics={
+            "policy_head": [
+                keras.metrics.SparseCategoricalAccuracy(name="policy_accuracy"),
+                keras.metrics.SparseTopKCategoricalAccuracy(k=5, name="top5_accuracy"),
+            ],
+            "value_head": [keras.metrics.MeanAbsoluteError(name="value_mae")],
+        },
+        loss_weights={"policy_head": 1.0, "value_head": 1.0},
     )
     print("Model compiled.")
 
@@ -241,14 +276,14 @@ def train_model():
     checkpoint_callback = keras.callbacks.ModelCheckpoint(
         filepath=BEST_MODEL_FILENAME,
         save_weights_only=False,
-        monitor="val_accuracy",
+        monitor="val_policy_head_policy_accuracy",
         mode="max",
         save_best_only=True,
         verbose=1,
     )
 
     early_stopping = keras.callbacks.EarlyStopping(
-        monitor="val_accuracy",
+        monitor="val_policy_head_policy_accuracy",
         patience=EARLY_STOPPING_PATIENCE,
         restore_best_weights=True,
         mode="max",
@@ -256,7 +291,7 @@ def train_model():
     )
 
     reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor="val_accuracy",
+        monitor="val_policy_head_policy_accuracy",
         factor=LR_REDUCE_FACTOR,
         patience=LR_REDUCE_PATIENCE,
         min_lr=MIN_LR,
@@ -310,7 +345,7 @@ def train_model():
         print("\nConverting best model to ONNX format...")
         if os.path.exists(BEST_MODEL_FILENAME):
             try:
-                cmd = f"python -m tf2onnx.convert --keras {BEST_MODEL_FILENAME} --output {ONNX_MODEL_FILENAME} --opset 13"
+                cmd = f"python3 -m tf2onnx.convert --keras {BEST_MODEL_FILENAME} --output {ONNX_MODEL_FILENAME} --opset 13"
                 print(f"Running command: {cmd}")
                 subprocess.run(
                     cmd, shell=True, check=True, capture_output=True, text=True
@@ -343,33 +378,35 @@ def train_model():
         try:
             plt.figure(figsize=(15, 6))
 
-            plt.subplot(1, 2, 1)
-            plt.plot(history.history["accuracy"], label="Training Accuracy")
-            plt.plot(history.history["val_accuracy"], label="Validation Accuracy")
-            if "top5_accuracy" in history.history:
-                plt.plot(
-                    history.history["top5_accuracy"],
-                    label="Training Top-5 Acc",
-                    linestyle="--",
-                )
-            if "val_top5_accuracy" in history.history:
-                plt.plot(
-                    history.history["val_top5_accuracy"],
-                    label="Validation Top-5 Acc",
-                    linestyle="--",
-                )
-            plt.title("Model Accuracy")
+            plt.subplot(1, 3, 1)
+            plt.plot(
+                history.history["policy_head_policy_accuracy"], label="Policy Accuracy"
+            )
+            plt.plot(
+                history.history["val_policy_head_policy_accuracy"],
+                label="Val Policy Accuracy",
+            )
+            plt.title("Policy Head Accuracy")
             plt.xlabel("Epoch")
             plt.ylabel("Accuracy")
             plt.legend()
             plt.grid(True)
 
-            plt.subplot(1, 2, 2)
-            plt.plot(history.history["loss"], label="Training Loss")
-            plt.plot(history.history["val_loss"], label="Validation Loss")
-            plt.title("Model Loss")
+            plt.subplot(1, 3, 2)
+            plt.plot(history.history["policy_head_loss"], label="Policy Loss")
+            plt.plot(history.history["val_policy_head_loss"], label="Val Policy Loss")
+            plt.title("Policy Head Loss")
             plt.xlabel("Epoch")
-            plt.ylabel("Loss (Sparse Categorical Crossentropy)")
+            plt.ylabel("Loss")
+            plt.legend()
+            plt.grid(True)
+
+            plt.subplot(1, 3, 3)
+            plt.plot(history.history["value_head_value_mae"], label="Value MAE")
+            plt.plot(history.history["val_value_head_value_mae"], label="Val Value MAE")
+            plt.title("Value Head Error")
+            plt.xlabel("Epoch")
+            plt.ylabel("MAE")
             plt.legend()
             plt.grid(True)
 

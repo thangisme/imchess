@@ -438,3 +438,28 @@
    text-align: center;
    font-size: 0.75rem;
  }
+
+ /* Highlight for selected squares */
+ .highlight-selected {
+   box-shadow: inset 0 0 3px 3px rgba(255, 255, 0, 0.7) !important;
+ }
+
+ /* Highlight for legal moves */
+ .highlight-legal {
+   box-shadow: inset 0 0 3px 3px rgba(0, 255, 0, 0.5) !important;
+ }
+
+ /* Highlight for last move */
+ .highlight-lastmove {
+   box-shadow: inset 0 0 3px 3px rgba(168, 186, 41, 0.8) !important;
+ }
+
+ /* Make sure highlights are visible on both light and dark squares */
+ .white-1e1d7 .highlight-selected,
+ .black-3c85d .highlight-selected,
+ .white-1e1d7 .highlight-legal,
+ .black-3c85d .highlight-legal,
+ .white-1e1d7 .highlight-lastmove,
+ .black-3c85d .highlight-lastmove {
+   z-index: 1;
+ }

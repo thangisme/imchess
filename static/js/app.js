@@ -18,6 +18,14 @@ class ChessGame {
     this.currentViewIndex = -1;
     this.viewingHistory = false;
     this.waitingForServerUpdate = false;
+    this.squareHighlights = {
+      selectedSquare: null,
+      legalMoves: []
+    };
+    this.lastMoveHighlight = {
+      from: null,
+      to: null
+    };
     this.initDomElements();
     this.setupEventListeners();
   }
@@ -103,10 +111,29 @@ class ChessGame {
     if (this.computerThinking) return false;
     if (this.viewingHistory) return false;
     if (this.waitingForServerUpdate) return false;
+
+    this.removeHighlights();
+
+    $(`#board .square-${source}`).addClass('highlight-selected');
+
+    const moves = this.game.moves({
+      square: source,
+      verbose: true
+    });
+
+    this.squareHighlights.selectedSquare = source;
+    this.squareHighlights.legalMoves = moves.map(move => move.to);
+
+    this.squareHighlights.legalMoves.forEach(square => {
+      $(`#board .square-${square}`).addClass('highlight-legal');
+    });
+
     return true;
   }
 
   onDrop(source, target) {
+    this.removeHighlights();
+
     if (this.viewingHistory) {
       this.goToLastMove();
       return 'snapback';
@@ -135,7 +162,49 @@ class ChessGame {
     return true;
   }
 
-  onSnapEnd() { }
+  onSnapEnd() {
+    this.removeHighlights();
+  }
+
+  removeHighlights() {
+    if (this.squareHighlights.selectedSquare) {
+      $(`#board .square-${this.squareHighlights.selectedSquare}`).removeClass('highlight-selected');
+    }
+
+    this.squareHighlights.legalMoves.forEach(square => {
+      $(`#board .square-${square}`).removeClass('highlight-legal');
+    });
+
+    this.squareHighlights.selectedSquare = null;
+    this.squareHighlights.legalMoves = [];
+  }
+
+  updateLastMoveHighlight() {
+    if (this.lastMoveHighlight.from) {
+      $(`#board .square-${this.lastMoveHighlight.from}`).removeClass('highlight-lastmove');
+    }
+    if (this.lastMoveHighlight.to) {
+      $(`#board .square-${this.lastMoveHighlight.to}`).removeClass('highlight-lastmove');
+    }
+
+    let lastMove = null;
+    if (this.currentViewIndex >= 0 && this.moveHistory.length > 0) {
+      lastMove = this.moveHistory[this.currentViewIndex];
+    } else if (this.moveHistory.length > 0 && !this.viewingHistory) {
+      lastMove = this.moveHistory[this.moveHistory.length - 1];
+    }
+
+    if (lastMove) {
+      this.lastMoveHighlight.from = lastMove.from;
+      this.lastMoveHighlight.to = lastMove.to;
+
+      $(`#board .square-${lastMove.from}`).addClass('highlight-lastmove');
+      $(`#board .square-${lastMove.to}`).addClass('highlight-lastmove');
+    } else {
+      this.lastMoveHighlight.from = null;
+      this.lastMoveHighlight.to = null;
+    }
+  }
 
   updateStatus() {
     this.currentTurnDisplay.textContent = this.game.turn() === 'w' ? 'White' : 'Black';
@@ -199,6 +268,7 @@ class ChessGame {
         this.board.orientation(this.getBoardOrientation());
         this.updateMoveCountFromFEN(message.fen);
         this.updateStatus();
+        this.updateLastMoveHighlight();
 
         if (!message.is_game_over) {
           this.startClock();
@@ -268,6 +338,8 @@ class ChessGame {
       this.moveHistory = [];
       this.currentViewIndex = -1;
       this.viewingHistory = false;
+      this.lastMoveHighlight = { from: null, to: null };
+      this.squareHighlights = { selectedSquare: null, legalMoves: [] };
       this.updateMoveList();
       this.updateHistoryNavButtons();
       this.updateHistoryView();
@@ -302,6 +374,9 @@ class ChessGame {
       this.currentViewIndex = -1;
       this.viewingHistory = false;
       this.waitingForServerUpdate = false;
+      this.lastMoveHighlight = { from: null, to: null };
+      this.squareHighlights = { selectedSquare: null, legalMoves: [] };
+      this.removeHighlights();
       this.updateMoveList();
       this.updateHistoryNavButtons();
       this.updateHistoryView();
@@ -334,6 +409,8 @@ class ChessGame {
     this.moveHistory = [];
     this.currentViewIndex = -1;
     this.viewingHistory = false;
+    this.lastMoveHighlight = { from: null, to: null };
+    this.squareHighlights = { selectedSquare: null, legalMoves: [] };
   }
 
   showComputerThinking(isThinking) {
@@ -386,7 +463,9 @@ class ChessGame {
 
   startClock() {
     if (this.timerInterval) clearInterval(this.timerInterval);
-    this.timerInterval = setInterval(() => this.tickClock(), 1000);
+    if (!this.viewingHistory) {
+      this.timerInterval = setInterval(() => this.tickClock(), 1000);
+    }
   }
 
   stopClock() {
@@ -470,6 +549,8 @@ class ChessGame {
     if (!this.viewingHistory) {
       this.currentViewIndex = this.moveHistory.length - 1;
     }
+
+    this.updateLastMoveHighlight();
   }
 
   updateMoveList() {
@@ -535,6 +616,8 @@ class ChessGame {
       (index === -1 && this.moveHistory.length > 0);
     this.currentViewIndex = index;
 
+    this.removeHighlights();
+
     if (index === -1) {
       this.game.reset();
       this.board.position('start');
@@ -544,11 +627,13 @@ class ChessGame {
       this.board.position(fenToLoad);
     }
 
-    // if (!wasViewingHistory && this.viewingHistory) {
-    //   this.stopClock();
-    // } else if (wasViewingHistory && !this.viewingHistory) {
-    //   this.startClock();
-    // }
+    this.updateLastMoveHighlight();
+
+    if (!wasViewingHistory && this.viewingHistory) {
+      this.stopClock();
+    } else if (wasViewingHistory && !this.viewingHistory) {
+      this.startClock();
+    }
 
     this.updateStatus();
     this.updateHistoryView();

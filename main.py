@@ -1,14 +1,16 @@
+import asyncio
+import chess
+import chess.engine
+import json
+import os
+import shutil
+import sys
+import uuid
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Literal, Dict, Any, Optional
-import chess
-import uuid
-import json
-import asyncio
-import os
-import sys
+from typing import Dict, Any, Optional, Literal, Callable
 
 try:
     from chess_engine.chess_ai_policy import ChessAI
@@ -19,6 +21,19 @@ except ImportError as e:
     POLICY_AI_AVAILABLE = False
     print(f"Error: Could not import PolicyChessAI: {e}", file=sys.stderr)
     print("Neural Network mode will not be available.", file=sys.stderr)
+
+try:
+    from chess_engine.stockfish_ai import StockfishAI
+    STOCKFISH_PATH = shutil.which("stockfish")
+    STOCKFISH_AVAILABLE = STOCKFISH_PATH is not None
+    if STOCKFISH_AVAILABLE:
+        print(f"Stockfish found at: {STOCKFISH_PATH}")
+    else:
+        print("Stockfish not found in PATH. Stockfish mode will not be available.", file=sys.stderr)
+except ImportError as e:
+    STOCKFISH_AVAILABLE = False
+    print(f"Error importing StockfishAI: {e}", file=sys.stderr)
+    print("Stockfish mode will not be available.", file=sys.stderr)
 
 POLICY_MODEL_PATH = "policy_models/policy_value_model.onnx"
 OPENING_BOOK_PATH = "baron30.bin"
@@ -31,8 +46,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class GameRequest(BaseModel):
     time_control: int
-    white_side: Literal["human", "nn_policy"]
-    black_side: Literal["human", "nn_policy"]
+    white_side: Literal["human", "nn_policy", "stockfish"]
+    black_side: Literal["human", "nn_policy", "stockfish"]
+    stockfish_depth: int = 15
+    stockfish_elo: int = 1800  # 0-20, 20 being strongest
+    nn_temperature: float = DEFAULT_POLICY_TEMPERATURE
 
 
 games: Dict[str, Any] = {}
@@ -41,7 +59,8 @@ computer_tasks: Dict[str, asyncio.Task] = {}
 
 class GameSession:
     def __init__(
-        self, game_id, white_side="human", black_side="human", time_control=300
+        self, game_id, white_side="human", black_side="human", time_control=300,
+        stockfish_depth=15, stockfish_elo=1800, nn_temperature=DEFAULT_POLICY_TEMPERATURE
     ):
         self.game_id = game_id
         self.connected_clients = set()
@@ -50,6 +69,9 @@ class GameSession:
         self.white_side = white_side
         self.black_side = black_side
         self.time_control = time_control
+        self.stockfish_depth = stockfish_depth
+        self.stockfish_elo = stockfish_elo
+        self.nn_temperature = nn_temperature
         self.engines: Dict[bool, Any] = {}
         self.last_move_made_info: Optional[Dict[str, Any]] = None
         self.is_engine_thinking = False
@@ -60,9 +82,17 @@ class GameSession:
 
         if white_side == "nn_policy" and POLICY_AI_AVAILABLE:
             self.engines[chess.WHITE] = self._create_nn_instance("White")
+        elif white_side == "stockfish" and STOCKFISH_AVAILABLE:
+            self.engines[chess.WHITE] = self._create_stockfish_instance(
+                "White", stockfish_depth, stockfish_elo)
+            print(f"Initiated Stockfish engine on White side, depth: {stockfish_depth}, elo: {stockfish_elo}")
 
         if black_side == "nn_policy" and POLICY_AI_AVAILABLE:
             self.engines[chess.BLACK] = self._create_nn_instance("Black")
+        elif black_side == "stockfish" and STOCKFISH_AVAILABLE:
+            self.engines[chess.BLACK] = self._create_stockfish_instance(
+                "Black", stockfish_depth, stockfish_elo)
+            print(f"Initiated Stockfish engine on Black side, depth: {stockfish_depth}, elo: {stockfish_elo}")
 
         print(f"Engines initialized for game {game_id}: {self.engines}")
 
@@ -81,7 +111,18 @@ class GameSession:
         return ChessAI(
             policy_model_path=POLICY_MODEL_PATH,
             opening_book_path=OPENING_BOOK_PATH,
-            temperature=DEFAULT_POLICY_TEMPERATURE,
+            temperature=self.nn_temperature,
+        )
+        
+    def _create_stockfish_instance(self, color_str: str, depth: int = 15, elo_rating: int = 1800):
+        if not STOCKFISH_AVAILABLE:
+            print(f"Error: Stockfish not available for {color_str}.", file=sys.stderr)
+            return None
+        return StockfishAI(
+            stockfish_path=STOCKFISH_PATH,
+            depth=depth,
+            time_limit=DEFAULT_SEARCH_TIME_LIMIT,
+            elo_rating=elo_rating
         )
 
     def push_move_and_record_info(self, move: chess.Move) -> bool:
@@ -108,6 +149,16 @@ class GameSession:
             if hasattr(ai_instance, "reset_board"):
                 ai_instance.reset_board()
         print(f"Game {self.game_id} board reset.")
+
+    def cleanup_engines(self):
+        """Close any engine resources properly"""
+        for color, engine in list(self.engines.items()):
+            if hasattr(engine, 'close'):
+                try:
+                    engine.close()
+                    print(f"Engine for {'White' if color else 'Black'} in game {self.game_id} closed.")
+                except Exception as e:
+                    print(f"Error closing engine: {e}", file=sys.stderr)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -136,6 +187,9 @@ async def create_new_game_api(request: GameRequest):
         white_side=request.white_side,
         black_side=request.black_side,
         time_control=request.time_control,
+        stockfish_depth=request.stockfish_depth,
+        stockfish_elo=request.stockfish_elo,
+        nn_temperature=request.nn_temperature,
     )
 
     if games[game_id].white_side != "human" and games[game_id].black_side != "human":
@@ -298,6 +352,7 @@ async def websocket_game_endpoint(websocket: WebSocket, game_id: str):
             print(f"No clients connected for game {game_id}. Cleaning up.")
             await _cancel_computer_task(game_id)
             if game_id in games:
+                games[game_id].cleanup_engines()
                 del games[game_id]
 
 
@@ -492,5 +547,6 @@ async def application_shutdown_event():
     for game_id in list(games.keys()):
         await _cancel_computer_task(game_id)
         if game_id in games:
+            games[game_id].cleanup_engines()
             del games[game_id]
     print("Cleanup complete.")

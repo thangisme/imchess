@@ -7,6 +7,8 @@ class ChessGame {
     this.whiteSide = 'human';
     this.blackSide = 'nn_policy';
     this.timeControl = 300;
+    this.stockfishDepth = 15;
+    this.stockfishElo = 1800;
     this.gameStarted = false;
     this.gameOver = false;
     this.computerThinking = false;
@@ -86,6 +88,27 @@ class ChessGame {
     this.prevMoveBtn.addEventListener('click', () => this.goToPreviousMove());
     this.nextMoveBtn.addEventListener('click', () => this.goToNextMove());
     this.lastMoveBtn.addEventListener('click', () => this.goToLastMove());
+    document.getElementById('stockfish-depth').addEventListener('input', (e) => {
+      this.stockfishDepth = parseInt(e.target.value, 10);
+      document.getElementById('stockfish-depth-value').textContent = this.stockfishDepth;
+    });
+
+    document.getElementById('stockfish-elo').addEventListener('input', (e) => {
+      this.stockfishElo = parseInt(e.target.value, 10);
+      document.getElementById('stockfish-elo-value').textContent = this.stockfishElo;
+    });
+
+    this.whiteSideSelect.addEventListener('change', () => {
+      this.whiteSide = this.whiteSideSelect.value;
+      this.updatePlayerLabels();
+      this.updateStockfishSettingsVisibility();
+    });
+
+    this.blackSideSelect.addEventListener('change', () => {
+      this.blackSide = this.blackSideSelect.value;
+      this.updatePlayerLabels();
+      this.updateStockfishSettingsVisibility();
+    });
   }
 
   initializeBoard() {
@@ -164,6 +187,15 @@ class ChessGame {
 
   onSnapEnd() {
     this.removeHighlights();
+  }
+
+  updateStockfishSettingsVisibility() {
+    const stockfishSettings = document.getElementById('stockfish-settings');
+    if (this.whiteSide === 'stockfish' || this.blackSide === 'stockfish') {
+      stockfishSettings.classList.remove('hidden');
+    } else {
+      stockfishSettings.classList.add('hidden');
+    }
   }
 
   removeHighlights() {
@@ -316,7 +348,9 @@ class ChessGame {
         body: JSON.stringify({
           time_control: this.timeControl,
           white_side: this.whiteSide,
-          black_side: this.blackSide
+          black_side: this.blackSide,
+          stockfish_depth: this.stockfishDepth,
+          stockfish_elo: this.stockfishElo,
         })
       });
       if (!response.ok) {
@@ -345,7 +379,7 @@ class ChessGame {
       this.updateHistoryView();
       this.initializeBoard();
       this.connectWebSocket(this.gameId);
-      const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network' };
+      const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network', 'stockfish': 'Stockfish' };
       this.gameModeDisplay.textContent = playerTypes[this.whiteSide] + ' vs ' + playerTypes[this.blackSide];
       this.timeControlDisplay.textContent = this.timeControlSelect.options[this.timeControlSelect.selectedIndex].text;
       this.currentTurnDisplay.textContent = 'White';
@@ -496,7 +530,7 @@ class ChessGame {
   }
 
   updatePlayerLabels() {
-    const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network' };
+    const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network', 'stockfish': 'Stockfish' };
     this.whitePlayerLabel.textContent = `White (${playerTypes[this.whiteSide]})`;
     this.blackPlayerLabel.textContent = `Black (${playerTypes[this.blackSide]})`;
   }

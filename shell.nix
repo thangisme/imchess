@@ -23,7 +23,8 @@ pkgs.mkShell {
       ps.numpy
       ps.matplotlib
       ps.orjson
+      ps.pandas
     ]))
-    pkgs.pychess
+    pkgs.stockfish
   ];
 }

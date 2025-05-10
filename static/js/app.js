@@ -7,7 +7,6 @@ class ChessGame {
     this.whiteSide = 'human';
     this.blackSide = 'nn_policy';
     this.timeControl = 300;
-    this.stockfishDepth = 15;
     this.stockfishElo = 1800;
     this.gameStarted = false;
     this.gameOver = false;
@@ -88,10 +87,10 @@ class ChessGame {
     this.prevMoveBtn.addEventListener('click', () => this.goToPreviousMove());
     this.nextMoveBtn.addEventListener('click', () => this.goToNextMove());
     this.lastMoveBtn.addEventListener('click', () => this.goToLastMove());
-    document.getElementById('stockfish-depth').addEventListener('input', (e) => {
-      this.stockfishDepth = parseInt(e.target.value, 10);
-      document.getElementById('stockfish-depth-value').textContent = this.stockfishDepth;
-    });
+    // document.getElementById('stockfish-depth').addEventListener('input', (e) => {
+    //   this.stockfishDepth = parseInt(e.target.value, 10);
+    //   document.getElementById('stockfish-depth-value').textContent = this.stockfishDepth;
+    // });
 
     document.getElementById('stockfish-elo').addEventListener('input', (e) => {
       this.stockfishElo = parseInt(e.target.value, 10);
@@ -349,7 +348,6 @@ class ChessGame {
           time_control: this.timeControl,
           white_side: this.whiteSide,
           black_side: this.blackSide,
-          stockfish_depth: this.stockfishDepth,
           stockfish_elo: this.stockfishElo,
         })
       });
@@ -379,7 +377,7 @@ class ChessGame {
       this.updateHistoryView();
       this.initializeBoard();
       this.connectWebSocket(this.gameId);
-      const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network', 'stockfish': 'Stockfish' };
+      const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network', 'stockfish': 'Stockfish' + `(${this.stockfishElo})` };
       this.gameModeDisplay.textContent = playerTypes[this.whiteSide] + ' vs ' + playerTypes[this.blackSide];
       this.timeControlDisplay.textContent = this.timeControlSelect.options[this.timeControlSelect.selectedIndex].text;
       this.currentTurnDisplay.textContent = 'White';

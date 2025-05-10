@@ -88,7 +88,7 @@ class StockfishAI:
             return None
             
         try:
-            limit = chess.engine.Limit(depth=depth, time=limit_time)
+            limit = chess.engine.Limit(time=limit_time)
             
             start_time = time.time()
             

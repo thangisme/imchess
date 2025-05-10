@@ -8,21 +8,18 @@ import sys
 
 try:
     import matplotlib.pyplot as plt
-
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 try:
     import tf2onnx
-    import subprocess
-
     TF2ONNX_AVAILABLE = True
 except ImportError:
     TF2ONNX_AVAILABLE = False
 
 
-DATA_DIR = "policy_training_data"
+DATA_DIR = "policy_training_data_mp"
 MODEL_OUTPUT_DIR = "policy_models"
 
 BATCH_SIZE = 4096
@@ -32,13 +29,11 @@ WEIGHT_DECAY = 0.01
 
 N_PLANES = 13
 INPUT_SHAPE = (8, 8, N_PLANES)
-# Calculate based on encoding: 63*320 + 63*5 + 4 = 20479
 MAX_MOVE_ID = 63 * (64 * 5) + 63 * 5 + 4
-NUM_POLICY_OUTPUTS = MAX_MOVE_ID + 1  # = 20480 (Size of the final Dense layer)
+NUM_POLICY_OUTPUTS = MAX_MOVE_ID + 1
 
-NUM_FILTERS = 128
-DENSE_UNITS_1 = 1024
-DENSE_UNITS_2 = 512
+NUM_RES_BLOCKS = 12
+NUM_FILTERS_RES = 192
 DROPOUT_RATE = 0.3
 
 EARLY_STOPPING_PATIENCE = 10
@@ -56,43 +51,51 @@ os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 os.makedirs(TENSORBOARD_LOG_DIR, exist_ok=True)
 
 
+def residual_block(x, filters):
+    x_skip = x
+    x = layers.Conv2D(filters, 3, padding='same', use_bias=False)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.Conv2D(filters, 3, padding='same', use_bias=False)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Add()([x, x_skip])
+    x = layers.Activation('relu')(x)
+    return x
+
+
 def build_policy_value_network(
     input_shape=INPUT_SHAPE,
-    num_filters=NUM_FILTERS,
-    dense_units_1=DENSE_UNITS_1,
-    dense_units_2=DENSE_UNITS_2,
+    num_res_blocks=NUM_RES_BLOCKS,
+    num_filters_res=NUM_FILTERS_RES,
     dropout_rate=DROPOUT_RATE,
     num_policy_outputs=NUM_POLICY_OUTPUTS,
 ):
     inputs = keras.Input(shape=input_shape, name="board_input")
 
-    x = layers.Conv2D(num_filters, 3, padding="same", activation="relu", name="conv1")(
-        inputs
-    )
-    x = layers.Conv2D(num_filters, 3, padding="same", activation="relu", name="conv2")(
-        x
-    )
-    x = layers.Conv2D(num_filters, 3, padding="same", activation="relu", name="conv3")(
-        x
-    )
+    x = layers.Conv2D(num_filters_res, 3, padding='same', use_bias=False, name="conv_stem")(inputs)
+    x = layers.BatchNormalization(name="bn_stem")(x)
+    x = layers.Activation('relu', name="relu_stem")(x)
 
-    x = layers.Flatten(name="flatten")(x)
+    for i in range(num_res_blocks):
+        x = residual_block(x, num_filters_res)
 
-    x = layers.Dense(dense_units_1, activation="relu", name="dense_1")(x)
-    x = layers.Dropout(dropout_rate, name="dropout_1")(x)
-    x = layers.Dense(dense_units_2, activation="relu", name="dense_2")(x)
+    policy_conv = layers.Conv2D(filters=32, kernel_size=1, padding='same', use_bias=False, name="policy_conv")(x)
+    policy_bn = layers.BatchNormalization(name="policy_bn")(policy_conv)
+    policy_relu = layers.Activation('relu', name="policy_relu")(policy_bn)
+    policy_flat = layers.Flatten(name="policy_flatten")(policy_relu)
+    policy_dropout = layers.Dropout(dropout_rate/2, name="policy_dropout")(policy_flat)
+    policy_head = layers.Dense(num_policy_outputs, activation='softmax', name='policy_head')(policy_dropout)
 
-    # Policy head (existing)
-    policy_head = layers.Dense(
-        num_policy_outputs, activation="softmax", name="policy_head"
-    )(x)
-
-    # Value head (new)
-    value_hidden = layers.Dense(256, activation="relu", name="value_hidden")(x)
-    value_head = layers.Dense(1, activation="tanh", name="value_head")(value_hidden)
+    value_conv = layers.Conv2D(filters=32, kernel_size=1, padding='same', use_bias=False, name="value_conv")(x)
+    value_bn = layers.BatchNormalization(name="value_bn")(value_conv)
+    value_relu = layers.Activation('relu', name="value_relu")(value_bn)
+    value_flat = layers.Flatten(name="value_flatten")(value_relu)
+    value_hidden = layers.Dense(256, activation='relu', name='value_dense_hidden')(value_flat)
+    value_dropout = layers.Dropout(dropout_rate/2, name="value_dropout")(value_hidden)
+    value_head = layers.Dense(1, activation='tanh', name='value_head')(value_dropout)
 
     model = keras.Model(
-        inputs=inputs, outputs=[policy_head, value_head], name="ChessPolicyValueNetwork"
+        inputs=inputs, outputs=[policy_head, value_head], name="ChessPolicyValueResNet"
     )
     return model
 
@@ -111,18 +114,14 @@ def data_generator(x_path, y_policy_path, y_value_path, indices, batch_size):
             batch_start = i * batch_size
             batch_end = (i + 1) * batch_size
             batch_indices = indices[batch_start:batch_end]
-
             try:
                 batch_x = np.array(x_mmap[batch_indices], dtype=np.float32)
                 batch_y_policy = np.array(y_policy_mmap[batch_indices], dtype=np.int32)
                 batch_y_value = np.array(y_value_mmap[batch_indices], dtype=np.float32)
-
-                # Return dictionary of outputs for multi-output model
                 yield (
                     batch_x,
                     {"policy_head": batch_y_policy, "value_head": batch_y_value},
                 )
-
             except IndexError as e:
                 print(
                     f"\nWarning: IndexError during batch generation (i={i}, indices={batch_indices}). "
@@ -136,7 +135,6 @@ def data_generator(x_path, y_policy_path, y_value_path, indices, batch_size):
 
 
 def train_model():
-    """Load data using generator and train the policy network."""
     print("Setting up data generators...")
     try:
         X_train_path = os.path.join(DATA_DIR, "X_train.npy")
@@ -247,7 +245,7 @@ def train_model():
         print(f"ERROR setting up data generators or datasets: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("Building the policy-value network model...")
+    print("Building the ResNet policy-value network model...")
     model = build_policy_value_network()
     model.summary()
 
@@ -313,7 +311,7 @@ def train_model():
 
     print(f"\n--- Starting Training for up to {EPOCHS} epochs ---")
     start_time = time.time()
-
+    history = None
     try:
         history = model.fit(
             train_dataset,
@@ -345,24 +343,20 @@ def train_model():
         print("\nConverting best model to ONNX format...")
         if os.path.exists(BEST_MODEL_FILENAME):
             try:
-                cmd = f"python3 -m tf2onnx.convert --keras {BEST_MODEL_FILENAME} --output {ONNX_MODEL_FILENAME} --opset 13"
-                print(f"Running command: {cmd}")
-                subprocess.run(
-                    cmd, shell=True, check=True, capture_output=True, text=True
+                print(f"Loading Keras model from {BEST_MODEL_FILENAME} for ONNX conversion...")
+                keras_model_to_convert = keras.models.load_model(BEST_MODEL_FILENAME)
+
+                print(f"Converting Keras model to ONNX: {BEST_MODEL_FILENAME} -> {ONNX_MODEL_FILENAME}")
+                tf2onnx.convert.from_keras(
+                    keras_model_to_convert,
+                    output_path=ONNX_MODEL_FILENAME,
+                    opset=13
                 )
+                
                 if os.path.exists(ONNX_MODEL_FILENAME):
                     print(f"ONNX model successfully saved to {ONNX_MODEL_FILENAME}")
                 else:
-                    print(
-                        "ERROR: ONNX conversion command ran but output file not found."
-                    )
-            except subprocess.CalledProcessError as e:
-                print(
-                    f"ERROR: ONNX conversion failed with exit code {e.returncode}.",
-                    file=sys.stderr,
-                )
-                print(f"Stderr:\n{e.stderr}", file=sys.stderr)
-                print(f"Stdout:\n{e.stdout}", file=sys.stderr)
+                    print("ERROR: ONNX conversion function ran but output file not found.")
             except Exception as e:
                 print(f"ERROR during ONNX conversion process: {e}", file=sys.stderr)
         else:
@@ -370,8 +364,8 @@ def train_model():
                 f"Skipping ONNX conversion: Best model file '{BEST_MODEL_FILENAME}' not found."
             )
     else:
-        print("\nSkipping ONNX conversion: 'tf2onnx' library not found.")
-        print("Install it with: pip install tf2onnx")
+        print("\nSkipping ONNX conversion: 'tf2onnx' or 'onnxruntime' library not found.")
+        print("Install them with: pip install tf2onnx onnxruntime")
 
     if MATPLOTLIB_AVAILABLE and history is not None:
         print("\nPlotting training history...")
@@ -425,3 +419,4 @@ def train_model():
 
 if __name__ == "__main__":
     train_model()
+

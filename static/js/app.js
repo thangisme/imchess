@@ -7,7 +7,8 @@ class ChessGame {
     this.whiteSide = 'human';
     this.blackSide = 'nn_policy';
     this.timeControl = 300;
-    this.stockfishElo = 1800;
+    const eloSlider = document.getElementById('stockfish-elo');
+    this.stockfishElo = eloSlider ? parseInt(eloSlider.value, 10) : 1800;
     this.gameStarted = false;
     this.gameOver = false;
     this.computerThinking = false;
@@ -91,6 +92,13 @@ class ChessGame {
     //   this.stockfishDepth = parseInt(e.target.value, 10);
     //   document.getElementById('stockfish-depth-value').textContent = this.stockfishDepth;
     // });
+
+    const eloSlider = document.getElementById('stockfish-elo');
+    const eloValue = document.getElementById('stockfish-elo-value');
+    if (eloSlider && eloValue) {
+      eloValue.textContent = eloSlider.value;
+      this.stockfishElo = parseInt(eloSlider.value, 10);
+    }
 
     document.getElementById('stockfish-elo').addEventListener('input', (e) => {
       this.stockfishElo = parseInt(e.target.value, 10);
@@ -192,6 +200,13 @@ class ChessGame {
     const stockfishSettings = document.getElementById('stockfish-settings');
     if (this.whiteSide === 'stockfish' || this.blackSide === 'stockfish') {
       stockfishSettings.classList.remove('hidden');
+
+      const eloSlider = document.getElementById('stockfish-elo');
+      const eloValue = document.getElementById('stockfish-elo-value');
+      if (eloSlider && eloValue) {
+        eloValue.textContent = eloSlider.value;
+        this.stockfishElo = parseInt(eloSlider.value, 10);
+      }
     } else {
       stockfishSettings.classList.add('hidden');
     }
@@ -340,6 +355,10 @@ class ChessGame {
       this.whiteSide = this.whiteSideSelect.value;
       this.blackSide = this.blackSideSelect.value;
       this.timeControl = parseInt(this.timeControlSelect.value, 10);
+      const eloSlider = document.getElementById('stockfish-elo');
+      if (eloSlider) {
+        this.stockfishElo = parseInt(eloSlider.value, 10);
+      }
       this.resetTimers();
       const response = await fetch('/api/new-game', {
         method: 'POST',
@@ -377,7 +396,7 @@ class ChessGame {
       this.updateHistoryView();
       this.initializeBoard();
       this.connectWebSocket(this.gameId);
-      const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network', 'stockfish': 'Stockfish' + `(${this.stockfishElo})` };
+      const playerTypes = { 'human': 'Human', 'nn_policy': 'Neural Network', 'stockfish': 'Stockfish' + ` (${this.stockfishElo})` };
       this.gameModeDisplay.textContent = playerTypes[this.whiteSide] + ' vs ' + playerTypes[this.blackSide];
       this.timeControlDisplay.textContent = this.timeControlSelect.options[this.timeControlSelect.selectedIndex].text;
       this.currentTurnDisplay.textContent = 'White';
@@ -428,6 +447,12 @@ class ChessGame {
     this.gameStarted = false;
     this.gameOver = false;
     this.waitingForServerUpdate = false;
+    const eloSlider = document.getElementById('stockfish-elo');
+    const eloValue = document.getElementById('stockfish-elo-value');
+    if (eloSlider && eloValue) {
+      eloSlider.value = this.stockfishElo;
+      eloValue.textContent = this.stockfishElo;
+    }
     this.stopClock();
     if (this.socket) {
       this.socket.close();
